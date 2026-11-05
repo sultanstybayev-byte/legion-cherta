@@ -308,6 +308,18 @@
     if (!r.ok) throw new Error(j.error || 'Не удалось загрузить картинку');
     return j.id;
   };
+  /* binary requests (structure models). Without a server the bytes live in this browser. */
+  App.raw = async function (method, path, bytes) {
+    if (App.mode !== 'server') {
+      const k = 'mcmap.bin.' + path, b64 = u => { let s = ''; for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode.apply(null, u.subarray(i, i + 32768)); return btoa(s); };
+      if (method === 'GET') { const v = read(k, null); if (!v) throw new Error('Модели нет'); const s = atob(v), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+      try { localStorage.setItem(k, JSON.stringify(b64(bytes))); } catch (e) { throw new Error('В браузере не хватает места для модели'); } return { ok: true };
+    }
+    const h = {}; const tk = read(TOKEN_KEY, ''); if (tk) h.Authorization = 'Bearer ' + tk; if (bytes) h['Content-Type'] = 'application/octet-stream';
+    const r = await fetch(CONFIG.api.replace(/\/+$/, '') + path, { method, headers: h, body: bytes || undefined });
+    if (!r.ok) { let j = {}; try { j = await r.json(); } catch (e) { } throw new Error(j.error || 'Ошибка сервера ' + r.status); }
+    return method === 'GET' ? new Uint8Array(await r.arrayBuffer()) : r.json();
+  };
   /* attachment picker: button + paste + drop, up to 4 pictures; returns {ids(), clear(), count()} */
   App.attach = function (holder, textarea, opts) {
     opts = opts || {}; const max = opts.max || 4, items = [];
@@ -496,7 +508,13 @@
   /* where a placed structure sits, in blocks: [x0, x1) × [z0, z1) */
   App.footprint = (def, s) => {
     if (!def) return null;
-    if (def.kind === 'temple' || def.kind === 'lotus') { const N = App.TEMPLE_N, ox = s.cx * 16 + 8, oz = s.cz * 16 + 8; return { x0: ox - N, x1: ox + N + 1, z0: oz - N, z1: oz + N + 1, ox, oz }; }
+    if (def.kind === 'temple' || def.kind === 'lotus' || def.kind === 'voxel') {   // block model: centre in the chunk's block 8, 8, turned by rot × 90°
+      const N = App.TEMPLE_N, w = def.bw || 2 * N + 1, d = def.bd || 2 * N + 1, lx = def.bw ? def.vx0 : -N, lz = def.bd ? def.vz0 : -N;
+      const ox = s.cx * 16 + 8, oz = s.cz * 16 + 8, q = ((s.rot || 0) % 4 + 4) % 4, c = [1, 0, -1, 0][q], sn = [0, 1, 0, -1][q];
+      const ps = [[lx, lz], [lx + w, lz], [lx, lz + d], [lx + w, lz + d]].map(([u, v]) => [u * c - v * sn, u * sn + v * c]);
+      const xs = ps.map(p => p[0]), zs = ps.map(p => p[1]);
+      return { x0: ox + Math.min(...xs), x1: ox + Math.max(...xs), z0: oz + Math.min(...zs), z1: oz + Math.max(...zs), ox, oz };
+    }
     const odd = (s.rot || 0) % 2 === 1, W = odd ? def.d : def.w, D = odd ? def.w : def.d, x0 = s.cx * 16, z0 = s.cz * 16;
     return { x0, x1: x0 + W * 16, z0, z1: z0 + D * 16, ox: x0 + W * 8, oz: z0 + D * 8 };
   };

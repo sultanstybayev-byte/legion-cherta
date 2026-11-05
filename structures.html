@@ -12,36 +12,141 @@
 <body>
 <div class="app">
   <main class="stage" id="stage">
-    <canvas id="view" aria-label="3D-просмотр структуры" style="display:block;width:100%;height:100%;touch-action:none;cursor:grab"></canvas>
-    <div class="hud" id="hud">Тяни мышью — вращать · колесо — приблизить · <span id="dims"></span></div>
-    <div class="banner" id="busy" hidden><h3>Считаю модель…</h3><p class="note">Большая структура, это пара секунд.</p></div>
+    <canvas id="view" tabindex="0" aria-label="3D-редактор структуры" style="display:block;width:100%;height:100%;touch-action:none;cursor:grab"></canvas>
+    <div class="toolbar" id="toolbar">
+      <button class="btn primary" id="walkBtn" aria-pressed="false">Войти внутрь</button>
+      <button class="btn" id="viewBtn">Обзор</button>
+      <div class="seg" id="toolSeg" role="group" aria-label="Инструмент">
+        <button class="btn" data-tool="block" aria-pressed="true" title="B">Блок</button>
+        <button class="btn" data-tool="brush" aria-pressed="false" title="N">Кисть</button>
+        <button class="btn" data-tool="select" aria-pressed="false" title="V">Выделение</button>
+      </div>
+      <button class="btn" id="undoBtn" title="Ctrl+Z">↶ Отменить</button>
+      <button class="btn" id="redoBtn" title="Ctrl+Y">↷ Вернуть</button>
+      <span class="savestate" id="saveState"></span>
+    </div>
+    <div class="crosshair" aria-hidden="true"></div>
+    <div class="hotbar" id="hotbar"></div>
+    <div class="hud" id="hud"></div>
+    <form class="cmdbar" id="cmdForm" autocomplete="off">
+      <input type="text" id="cmd" placeholder="Команда WorldEdit, например //set stone или //replace glass air  ·  //help — список" spellcheck="false">
+    </form>
+    <div class="banner" id="busy" hidden><h3 id="busyTitle">Загружаю модель…</h3><p class="note" id="busyNote">Это пара секунд.</p></div>
   </main>
-  <aside class="side" aria-label="Библиотека структур">
+  <aside class="side" aria-label="Библиотека и редактор структур">
     <section class="sec">
-      <h2>Библиотека структур</h2>
-      <p class="note">Постройки, которые ставятся на платформу в «Плане базы». Здесь мы их дорабатываем: размеры, модель, правки.</p>
-      <div class="row" id="addRow"><button class="btn primary" id="addDef">+ Новая заготовка</button></div>
+      <h2>Структуры</h2>
+      <p class="note">Постройки для «Плана базы». Здесь их строят и правят: блоки, кисть, выделение и команды WorldEdit, загрузка схематик.</p>
+      <div class="row" id="addRow">
+        <button class="btn primary" id="addDef">+ Новая</button>
+        <label class="btn" for="schemFile">Загрузить схематику</label>
+        <input type="file" id="schemFile" accept=".schem,.schematic,.litematic,.nbt" hidden>
+      </div>
     </section>
     <div class="list" id="defList"></div>
+
     <section class="sec" id="editor" hidden>
       <h2 id="edHead">Структура</h2>
       <label class="f">Название<input type="text" id="dName" maxlength="60"></label>
-      <div class="row"><label class="f">Цвет<input type="color" id="dColor"></label><p class="note grow" id="dKind"></p></div>
+      <div class="row"><label class="f">Цвет на карте<input type="color" id="dColor"></label><p class="note grow" id="dKind"></p></div>
+      <label class="f">Симметрия
+        <select id="dSym">
+          <option value="none">Нет</option>
+          <option value="mx">Зеркало: лево ↔ право (по X)</option>
+          <option value="mz">Зеркало: перед ↔ зад (по Z)</option>
+          <option value="mxz">Зеркало по X и по Z</option>
+          <option value="r4">4 поворота</option>
+          <option value="r4m">4 поворота + зеркало</option>
+          <option value="r6m">6 поворотов + зеркало</option>
+          <option value="r8m">8 поворотов + зеркало</option>
+          <option value="r9m">9 поворотов + зеркало (Храм Лотоса)</option>
+        </select>
+      </label>
       <div class="coords3" id="boxDims">
         <label class="f">Ширина, чанков<input type="number" id="dW" min="1" max="32" step="1"></label>
         <label class="f">Глубина, чанков<input type="number" id="dD" min="1" max="32" step="1"></label>
         <label class="f">Высота, блоков<input type="number" id="dH" min="1" max="320" step="1"></label>
       </div>
-      <div id="lotusOpts" style="display:flex;flex-direction:column;gap:10px"><p class="note" id="dEdits"></p><div class="row"><span class="note grow" id="dEditCount"></span><button class="btn" id="clearEdits">Сбросить правки блоков</button></div></div>
+      <p class="note" id="dInfo"></p>
       <label class="f">Заметка<textarea id="dNote" maxlength="600" placeholder="что это, из чего строить, что доработать"></textarea></label>
-      <div class="row" id="edButtons"><button class="btn primary" id="dSave">Сохранить</button><span class="spacer"></span><button class="btn danger" id="dDel">Удалить</button></div>
+      <div class="row" id="edButtons">
+        <button class="btn primary" id="dSave">Сохранить</button>
+        <button class="btn" id="toModel" hidden>Сделать моделью из блоков</button>
+        <span class="spacer"></span><button class="btn danger" id="dDel">Удалить</button>
+      </div>
+      <div class="row" id="modelButtons">
+        <button class="btn" id="exportBtn">Скачать .schem</button>
+        <label class="btn" for="schemInto" id="schemIntoLbl">Заменить схематикой…</label><input type="file" id="schemInto" accept=".schem,.schematic,.litematic,.nbt" hidden>
+      </div>
+      <div class="row" id="resetRow">
+        <button class="btn" id="resetBtn">Сбросить правки</button>
+        <button class="btn" id="restoreBtn" hidden>Вернуть правки</button>
+      </div>
+      <p class="note" id="resetNote"></p>
+    </section>
+
+    <section class="sec" id="toolsSec" hidden>
+      <h2>Инструменты</h2>
+      <label class="f">Блок<input type="search" id="blockSearch" placeholder="поиск: quartz, стекло, oak_stairs[facing=north]…" list="blockList"></label>
+      <datalist id="blockList"></datalist>
+      <div class="palette" id="palette" aria-label="Блоки этой структуры"></div>
+      <div id="brushOpts" class="row" hidden>
+        <label class="f">Размер кисти<select id="brushSize"><option value="1">1 блок</option><option value="2">3</option><option value="3">5</option><option value="4">7</option><option value="6">11</option><option value="9">17</option></select></label>
+        <label class="f">Режим<select id="brushMode"><option value="sphere">Шар из блока</option><option value="paint">Перекрасить только блоки</option><option value="erase">Стереть</option></select></label>
+      </div>
+      <label class="chip"><input type="checkbox" id="symOn" checked><span class="dot" style="background:var(--accent)"></span>Зеркалить правки по симметрии</label>
+      <p class="note" id="toolHelp"></p>
+    </section>
+
+    <section class="sec" id="weSec" hidden>
+      <h2>WorldEdit <small id="selInfo"></small></h2>
+      <p class="note">Выдели область: инструмент «Выделение», ЛКМ — точка 1, ПКМ — точка 2. Блок для команд — выбранный выше.</p>
+      <div class="we">
+        <button class="btn sm" data-we="//set">Заполнить</button>
+        <button class="btn sm" data-we="//replace">Заменить…</button>
+        <button class="btn sm" data-we="//set air">Очистить</button>
+        <button class="btn sm" data-we="//walls">Стены</button>
+        <button class="btn sm" data-we="//faces">Коробка</button>
+        <button class="btn sm" data-we="//hollow">Пустая внутри</button>
+        <button class="btn sm" data-we="//copy">Копировать</button>
+        <button class="btn sm" data-we="//cut">Вырезать</button>
+        <button class="btn sm" data-we="//paste">Вставить</button>
+        <button class="btn sm" data-we="//rotate 90">Повернуть 90°</button>
+        <button class="btn sm" data-we="//flip">Отразить</button>
+        <button class="btn sm" data-we="//stack">Повторить…</button>
+        <button class="btn sm" data-we="//move">Сдвинуть…</button>
+        <button class="btn sm" data-we="//sphere">Шар…</button>
+        <button class="btn sm" data-we="//cyl">Цилиндр…</button>
+        <button class="btn sm" data-we="//pyramid">Пирамида…</button>
+        <button class="btn sm" data-we="//line">Линия</button>
+        <button class="btn sm" data-we="//count">Посчитать</button>
+        <button class="btn sm" data-we="//desel">Снять выделение</button>
+        <button class="btn sm" data-we="//help">Все команды</button>
+      </div>
+      <pre class="welog" id="weLog"></pre>
     </section>
   </aside>
 </div>
+<dialog id="newDlg">
+  <div class="dh"><h2>Новая структура</h2><button class="btn sm" data-close>Закрыть</button></div>
+  <div class="db">
+    <label class="f">Название<input type="text" id="nName" maxlength="60" value="Новая структура"></label>
+    <div class="coords3">
+      <label class="f">Ширина, блоков<input type="number" id="nW" min="4" max="512" value="32"></label>
+      <label class="f">Глубина, блоков<input type="number" id="nD" min="4" max="512" value="32"></label>
+      <label class="f">Высота, блоков<input type="number" id="nH" min="4" max="320" value="32"></label>
+    </div>
+    <label class="f">Основа<select id="nBase"><option value="empty">Пусто</option><option value="floor">Пол из гладкого камня</option></select></label>
+    <label class="f">Симметрия<select id="nSym"><option value="none">Нет</option><option value="mx">Зеркало по X</option><option value="mxz">Зеркало по X и Z</option><option value="r4m">4 поворота + зеркало</option></select></label>
+    <p class="note">Размер растёт сам, если строишь за краем. Схематику можно загрузить кнопкой «Загрузить схематику».</p>
+  </div>
+  <div class="df"><button class="btn primary" id="nOk">Создать</button></div>
+</dialog>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="js/config.js"></script>
 <script src="js/common.js"></script>
 <script src="js/temple.js"></script>
+<script src="js/vox.js"></script>
 <script src="js/structures.js"></script>
 </body>
 </html>

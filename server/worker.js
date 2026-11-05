@@ -19,6 +19,7 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS posts_thread ON posts(thread, id)`,
   `CREATE TABLE IF NOT EXISTS chat (id INTEGER PRIMARY KEY AUTOINCREMENT, author INTEGER NOT NULL, body TEXT NOT NULL, created INTEGER)`,
   `CREATE TABLE IF NOT EXISTS lists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color TEXT, pos INTEGER NOT NULL DEFAULT 0, created INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS structdata (id TEXT NOT NULL, slot TEXT NOT NULL, data BLOB NOT NULL, size INTEGER, author INTEGER, updated INTEGER, PRIMARY KEY (id, slot))`,
   `CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, author INTEGER NOT NULL, mime TEXT NOT NULL, data BLOB NOT NULL, size INTEGER, created INTEGER)`,
   `CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, list INTEGER NOT NULL, title TEXT NOT NULL, note TEXT, status TEXT NOT NULL DEFAULT 'todo', assignee INTEGER, pos INTEGER NOT NULL DEFAULT 0, author INTEGER, created INTEGER, updated INTEGER)`
 ];
@@ -170,11 +171,14 @@ function cleanDefs(list) {
   return list.slice(0, 100).map(d => {
     const edits = Array.isArray(d.edits) ? d.edits.filter(e => Array.isArray(e) && e.length === 4 && e.every(Number.isFinite)).map(e => e.map(v => Math.trunc(v))) : [];
     total += edits.length; if (total > 200000) fail(413, 'Слишком много правок в структурах');
-    return { id: str(d.id, 40, 'id') || String(now()), name: str(d.name, 60, 'Название') || 'Структура', kind: ['temple', 'lotus'].includes(d.kind) ? d.kind : 'box',
+    const sym = d.sym && typeof d.sym === 'object' ? { n: int(d.sym.n || 1, 'Симметрия', 1, 16), mirror: !!d.sym.mirror, axis: d.sym.axis === 'z' ? 'z' : 'x' } : null;
+    return { id: str(d.id, 40, 'id') || String(now()), name: str(d.name, 60, 'Название') || 'Структура', kind: ['temple', 'lotus', 'voxel'].includes(d.kind) ? d.kind : 'box',
+      sym, dataV: int(d.dataV || 0, 'Версия модели', 0, 1e15), backupV: int(d.backupV || 0, 'Версия копии', 0, 1e15),
+      bw: int(d.bw || 0, 'Ширина модели', 0, 1024), bd: int(d.bd || 0, 'Глубина модели', 0, 1024), vx0: int(d.vx0 || 0, 'Сдвиг X', -1024, 1024), vz0: int(d.vz0 || 0, 'Сдвиг Z', -1024, 1024),
       scale: [0.55, 0.75, 1].includes(Number(d.scale)) ? Number(d.scale) : 1, edits,
       zones: (Array.isArray(d.zones) ? d.zones : []).filter(z => Array.isArray(z) && z.length === 4 && z.every(Number.isFinite)).slice(0, 60000).map(z => z.map(v => Math.trunc(v))),
       zoneNames: Object.fromEntries(Object.entries(d.zoneNames && typeof d.zoneNames === 'object' ? d.zoneNames : {}).filter(([k]) => /^\d{1,2}$/.test(k)).slice(0, 16).map(([k, v]) => [k, String(v || '').slice(0, 40)])),
-      w: int(d.w || 1, 'Ширина', 1, 32), d: int(d.d || 1, 'Глубина', 1, 32), h: int(d.h || 8, 'Высота', 1, 320), color: color(d.color), note: str(d.note, 600, 'Заметка') };
+      w: int(d.w || 1, 'Ширина', 1, 32), d: int(d.d || 1, 'Глубина', 1, 32), h: int(d.h || 8, 'Высота', 1, 512), color: color(d.color), note: str(d.note, 600, 'Заметка') };
   });
 }
 async function world(env) {
@@ -275,6 +279,25 @@ async function route(req, env) {
     return { ok: true, markers: n };
   }
 
+  /* block models of structures: current version and one backup, stored as binary (see js/vox.js) */
+  if (r[0] === 'structdata' && id && /^[A-Za-z0-9_-]{1,40}$/.test(id)) {
+    const slot = url.searchParams.get('slot') === 'backup' ? 'backup' : 'current';
+    if (M === 'GET') {
+      const row = await env.DB.prepare('SELECT data FROM structdata WHERE id = ? AND slot = ?').bind(id, slot).first();
+      if (!row) fail(404, 'Модели нет');
+      const data = row.data instanceof ArrayBuffer ? row.data : new Uint8Array(row.data).buffer;
+      return new Response(data, { status: 200, headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-cache' } });
+    }
+    if (M === 'PUT') {
+      need.level(me, env, 'moderator', 'Модели структур меняют модераторы');
+      const buf = new Uint8Array(await req.arrayBuffer());
+      if (!buf.length) fail(400, 'Пустая модель'); if (buf.length > 1900000) fail(413, 'Модель слишком большая (больше 1,9 МБ в сжатом виде)');
+      await env.DB.prepare('INSERT INTO structdata (id, slot, data, size, author, updated) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id, slot) DO UPDATE SET data = excluded.data, size = excluded.size, author = excluded.author, updated = excluded.updated')
+        .bind(id, slot, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), buf.length, me.id, now()).run();
+      return { ok: true, size: buf.length };
+    }
+    if (M === 'DELETE') { need.level(me, env, 'moderator', 'Модели структур меняют модераторы'); await env.DB.prepare('DELETE FROM structdata WHERE id = ? AND slot = ?').bind(id, slot).run(); return { ok: true }; }
+  }
   /* images */
   if (r[0] === 'images' && !id && M === 'POST') {
     need.login(me);
