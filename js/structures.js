@@ -191,7 +191,7 @@
     return o(vox.get(x + 1, y, z)) || o(vox.get(x - 1, y, z)) || o(vox.get(x, y + 1, z)) || o(vox.get(x, y - 1, z)) || o(vox.get(x, y, z + 1)) || o(vox.get(x, y, z - 1));
   }
   function rebuild(recenter) {
-    for (const m of view.meshes) if (m) { scene.remove(m); m.material.dispose(); m.dispose && m.dispose(); }
+    for (const m of view.meshes) if (m) { scene.remove(m); m.material.dispose(); m.dispose(); }
     view.meshes = [null, null]; view.index.clear(); view.n = [0, 0];
     if (box) { scene.remove(box); box.traverse(x => { if (x.geometry && x.geometry !== geo) x.geometry.dispose(); if (x.material) x.material.dispose(); }); box = null; }
     const d = defOf(cur);
@@ -243,7 +243,7 @@
   // chunk grid and a ground plane (y = 0 is the top of the ground)
   let grid = null, groundPl = null;
   function drawGrid() {
-    if (grid) { scene.remove(grid); grid.geometry.dispose(); } if (groundPl) { scene.remove(groundPl); groundPl.geometry.dispose(); }
+    if (grid) { scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); } if (groundPl) { scene.remove(groundPl); groundPl.geometry.dispose(); groundPl.material.dispose(); }
     const x0 = vox ? vox.x0 : -32, z0 = vox ? vox.z0 : -32, w = vox ? vox.w : 64, d = vox ? vox.d : 64;
     const cx0 = Math.floor((x0 - 16) / 16) * 16, cx1 = Math.ceil((x0 + w + 16) / 16) * 16, cz0 = Math.floor((z0 - 16) / 16) * 16, cz1 = Math.ceil((z0 + d + 16) / 16) * 16, pts = [];
     for (let x = cx0; x <= cx1; x += 16) pts.push(x, 0.02, cz0, x, 0.02, cz1);
@@ -543,7 +543,7 @@
 
   /* ================= input ================= */
   canvas.addEventListener('contextmenu', e => e.preventDefault());
-  let drag = null, stroke = null;
+  let drag = null, stroke = null, hoverQ = false;
   canvas.addEventListener('pointerdown', e => {
     canvas.focus({ preventScroll: true });
     if (fp.on) {
@@ -558,7 +558,7 @@
   });
   canvas.addEventListener('pointermove', e => {
     if (fp.on) return;
-    if (!drag) { if (vox && CAN) { const a = aimMouse(e.clientX, e.clientY); showAim(a); redraw(); } return; }
+    if (!drag) { if (vox && CAN && !hoverQ) { hoverQ = true; const x = e.clientX, y = e.clientY; requestAnimationFrame(() => { hoverQ = false; if (drag || fp.on) return; showAim(aimMouse(x, y)); redraw(); }); } return; }
     if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true;
     if (drag.paint) { const a = aimMouse(e.clientX, e.clientY), k = a ? a.x + ',' + a.y + ',' + a.z : ''; if (a && k !== drag.lastKey) { drag.lastKey = k; useTool(a, 0); } showAim(a); return; }
     if (drag.moved) { orbit.th += (e.clientX - drag.x) * 0.008; orbit.ph = Math.min(1.55, Math.max(0.05, orbit.ph - (e.clientY - drag.y) * 0.008)); redraw(); }
@@ -588,9 +588,11 @@
     if (!fp.on) return;
     if (e.code === 'Escape') { stopFP(); return; }
     if (e.code === 'KeyF') { fp.fly = !fp.fly; fp.vy = 0; App.toast(fp.fly ? 'Полёт: Space — вверх, Shift — вниз' : 'Ходьба: Space — прыжок', 1800); return; }
-    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'KeyC', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) { e.preventDefault(); fp.keys.add(e.code); }
+    // sprint: hold R or double-tap W (Ctrl would make Ctrl+W, which closes the browser tab)
+    if (e.code === 'KeyW' && !e.repeat) { const t = performance.now(); if (t - (fp.lastW || 0) < 300) fp.sprint = true; fp.lastW = t; }
+    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyR', 'KeyC', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) { e.preventDefault(); fp.keys.add(e.code); }
   });
-  document.addEventListener('keyup', e => fp.keys.delete(e.code));
+  document.addEventListener('keyup', e => { fp.keys.delete(e.code); if (e.code === 'KeyW') fp.sprint = false; });
   window.addEventListener('blur', () => fp.keys.clear());
 
   /* ================= first person ================= */
@@ -627,7 +629,7 @@
     if (!fp.on) return;
     const dt = Math.min(0.05, (now - fp.last) / 1000); fp.last = now; const k = c => fp.keys.has(c);
     const f = (k('KeyW') || k('ArrowUp') ? 1 : 0) - (k('KeyS') || k('ArrowDown') ? 1 : 0), r = (k('KeyD') || k('ArrowRight') ? 1 : 0) - (k('KeyA') || k('ArrowLeft') ? 1 : 0);
-    const sp = fp.fly ? (k('ControlLeft') ? 26 : 11) : (k('ControlLeft') ? 5.6 : 4.3), sy = Math.sin(fp.yaw), cy = Math.cos(fp.yaw), len = Math.hypot(f, r) || 1;
+    const fast = k('KeyR') || fp.sprint, sp = fp.fly ? (fast ? 26 : 11) : (fast ? 5.6 : 4.3), sy = Math.sin(fp.yaw), cy = Math.cos(fp.yaw), len = Math.hypot(f, r) || 1;
     const vx = (-sy * f + cy * r) / len * sp, vz = (-cy * f - sy * r) / len * sp;
     if (fp.fly) fp.vy = ((k('Space') ? 1 : 0) - (k('ShiftLeft') || k('ShiftRight') || k('KeyC') ? 1 : 0)) * sp;
     else { if (k('Space') && fp.ground) { fp.vy = 8.6; fp.ground = false; } fp.vy = Math.max(-60, fp.vy - 28 * dt); }
@@ -643,7 +645,7 @@
   function hud() {
     const t = { block: 'ЛКМ — сломать · ПКМ — поставить · колёсико-клик — взять блок', brush: 'ЛКМ — кисть (держи и води) · ПКМ — стереть', select: 'ЛКМ — точка 1 · ПКМ — точка 2' }[tool];
     $('hud').innerHTML = fp.on
-      ? (fp.locked ? `<b>W</b><b>A</b><b>S</b><b>D</b> · <b>Space</b>/<b>Shift</b> вверх/вниз · <b>Ctrl</b> быстрее · <b>F</b> полёт/ходьба · ${t} · <b>1–9</b> блок · <b>T</b> или <b>/</b> — команда · <b>Esc</b> — выйти<br><span id="fpPos"></span>`
+      ? (fp.locked ? `<b>W</b><b>A</b><b>S</b><b>D</b> · <b>Space</b>/<b>Shift</b> вверх/вниз · <b>R</b> или двойное <b>W</b> — быстрее · <b>F</b> полёт/ходьба · ${t} · <b>1–9</b> блок · <b>T</b> или <b>/</b> — команда · <b>Esc</b> — выйти<br><span id="fpPos"></span>`
         : 'Мышь отпущена. <b>Кликни по 3D</b>, чтобы продолжить, или «Выйти».')
       : `Тяни мышью — вращать · колесо — приблизить · ${tool === 'brush' ? 'тяни левой — красить, правой — вращать' : t} · <b>B</b>/<b>N</b>/<b>V</b> — инструмент · <b>Ctrl+Z</b> — отменить · <b>/</b> — команда`;
   }

@@ -46,11 +46,11 @@
   function indexTasks() { taskOf.clear(); for (const t of P().tasks) for (const [cx, cz] of t.chunks) taskOf.set(key(cx, cz), t); }
   function buildGround() {
     const pl = P().platform, n = pl.size;
-    if (ground) { scene.remove(ground); ground.geometry.dispose(); }
+    if (ground) { scene.remove(ground); ground.geometry.dispose(); ground.material.dispose(); ground.dispose(); }
     ground = new THREE.InstancedMesh(new THREE.BoxGeometry(16, 0.4, 16), new THREE.MeshLambertMaterial({ color: 0xffffff }), n * n);
     for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { tmpM.makeTranslation((pl.cx0 + i) * 16 + 8, -0.2, (pl.cz0 + j) * 16 + 8); ground.setMatrixAt(i * n + j, tmpM); }
     ground.setColorAt(0, tmpC.set('#ffffff')); scene.add(ground);
-    if (lines) { scene.remove(lines); lines.geometry.dispose(); }
+    if (lines) { scene.remove(lines); lines.geometry.dispose(); lines.material.dispose(); }
     const pts = [], x0 = pl.cx0 * 16, z0 = pl.cz0 * 16, L = n * 16;
     for (let i = 0; i <= n; i++) { pts.push(x0 + i * 16, 0.03, z0, x0 + i * 16, 0.03, z0 + L, x0, 0.03, z0 + i * 16, x0 + L, 0.03, z0 + i * 16); }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
@@ -68,7 +68,7 @@
     }
     ground.instanceColor.needsUpdate = true;
     // selection outline
-    if (selLines) { scene.remove(selLines); selLines.geometry.dispose(); selLines = null; }
+    if (selLines) { scene.remove(selLines); selLines.geometry.dispose(); selLines.material.dispose(); selLines = null; }
     if (sel.size) {
       const pts = [], y = 0.08;
       for (const k of sel) { const [cx, cz] = k.split(',').map(Number), x = cx * 16, z = cz * 16;
@@ -83,7 +83,7 @@
   }
   // dashed outline around each task's area, in the task's colour (inner borders between its own chunks are skipped)
   function buildTaskLines() {
-    if (taskLines) { scene.remove(taskLines); taskLines.geometry.dispose(); taskLines.material.dispose(); taskLines = null; }
+    if (taskLines) { scene.remove(taskLines); taskLines.geometry.dispose(); taskLines.material.dispose(); taskLines.dispose(); taskLines = null; }
     const dashes = [];   // [x, y, z, horizontal?, colour]
     const ys = $('volume').checked ? [0.2, 8.1] : [0.2];
     const D = 2.6, G = 1.4, I = 0.7;                      // dash, gap, inset from the chunk border
@@ -105,7 +105,7 @@
     taskLines.renderOrder = 4; scene.add(taskLines);
   }
   function buildVolume() {
-    if (volume) { scene.remove(volume); volume.geometry.dispose(); volume = null; }
+    if (volume) { scene.remove(volume); volume.geometry.dispose(); volume.material.dispose(); volume.dispose(); volume = null; }
     if (!$('volume').checked) return;
     const list = []; for (const t of P().tasks) for (const c of t.chunks) list.push([c[0], c[1], t.color]);
     if (!list.length) return;
@@ -213,7 +213,7 @@
     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w - 0.4, def.h, d - 0.4)), new THREE.LineBasicMaterial({ color: new THREE.Color(def.color) }));
     edges.position.set(0, def.h / 2, 0); g.add(edges); return g;
   }
-  function disposeObj(o) { o.traverse(x => { if (x.geometry && x.geometry !== boxGeo) x.geometry.dispose(); if (x.material) x.material.dispose(); }); }
+  function disposeObj(o) { o.traverse(x => { if (x.geometry && x.geometry !== boxGeo) x.geometry.dispose(); if (x.material) x.material.dispose(); if (x.isInstancedMesh) x.dispose(); }); }   // InstancedMesh.dispose frees its GPU buffers
   function syncStructures() {
     const hidden = App.pref('plan.hidden', false), need = insts().filter(s => defOf(s.def));
     const wantLotus = need.some(s => { const d = defOf(s.def); return isModel(d) && !VX.cached(d); });
@@ -502,7 +502,7 @@
     const sp = walk.fly ? (k('ShiftLeft') || k('ShiftRight') ? 22 : 11) : (k('ShiftLeft') || k('ShiftRight') ? 5.6 : 4.3);
     const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw), len = Math.hypot(f, r) || 1;
     const vx = (-sy * f + cy * r) / len * sp, vz = (-cy * f - sy * r) / len * sp;
-    if (walk.fly) walk.vy = ((k('Space') ? 1 : 0) - (k('KeyC') || k('ControlLeft') ? 1 : 0)) * sp;
+    if (walk.fly) walk.vy = ((k('Space') ? 1 : 0) - (k('KeyC') ? 1 : 0)) * sp;
     else { if (k('Space') && walk.ground) { walk.vy = JUMP; walk.ground = false; } walk.vy = Math.max(-60, walk.vy - GRAV * dt); }
     // horizontal: one axis at a time; a one-block step is climbed on its own (like auto-jump)
     for (const [ax, v] of [['px', vx * dt], ['pz', vz * dt]]) {
@@ -521,7 +521,7 @@
     if (!walk.on) return;
     if (e.code === 'Escape') { stopWalk(); return; }
     if (e.code === 'KeyF') { walk.fly = !walk.fly; walk.vy = 0; App.toast(walk.fly ? 'Полёт: Space — вверх, C — вниз' : 'Полёт выключен', 1800); return; }
-    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ControlLeft', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) { e.preventDefault(); walk.keys.add(e.code); }
+    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) { e.preventDefault(); walk.keys.add(e.code); }
   });
   document.addEventListener('keyup', e => walk.keys.delete(e.code));
   document.addEventListener('mousemove', e => { if (!walk.on || document.pointerLockElement !== canvas || performance.now() - (walk.lockedAt || 0) < 150 || Math.abs(e.movementX) > 250 || Math.abs(e.movementY) > 250) return; cam.yaw -= e.movementX * 0.0022; cam.pitch = Math.min(1.55, Math.max(-1.55, cam.pitch - e.movementY * 0.0022)); });
