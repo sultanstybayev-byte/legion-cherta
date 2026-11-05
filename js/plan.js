@@ -292,7 +292,7 @@
     if (s && def) {
       const fp = App.footprint(def, s), [pcx, pcz] = platformCentre(), mx = (fp.x0 + fp.x1) / 2, mz = (fp.z0 + fp.z1) / 2, offx = mx - pcx, offz = mz - pcz;
       const used = VX.chunksUsed(topFn(s), fp.x0, fp.x1, fp.z0, fp.z1, 0, 0);
-      $('structInfo').innerHTML = `<b>${esc(def.name)}</b> · ${fp.x1 - fp.x0}×${fp.z1 - fp.z0} блоков<br>центр в мире X ${String(mx).replace('.', ',')} · Z ${String(mz).replace('.', ',')}<br>от центра платформы: X ${fmtOff(offx)} · Z ${fmtOff(offz)}${!offx && !offz ? ' — ровно по центру' : ''}<br>занимает чанков: ${used.n}${used.n ? ` (X ${sgn(used.cx0)}…${sgn(used.cx1)}, Z ${sgn(used.cz0)}…${sgn(used.cz1)})` : ''}`;
+      $('structInfo').innerHTML = `<b>${esc(def.name)}</b> · ${fp.x1 - fp.x0}×${fp.z1 - fp.z0} блоков<br>центр в мире X ${String(mx).replace('.', ',')} · Z ${String(mz).replace('.', ',')}<br>от центра платформы: X ${fmtOff(offx)} · Z ${fmtOff(offz)}${!offx && !offz ? ' — ровно по центру' : ''}<br>центр в чанке: ${(((mx % 16) + 16) % 16) === 8 && (((mz % 16) + 16) % 16) === 8 ? 'в середине ✓' : 'блок ' + String(((mx % 16) + 16) % 16).replace('.', ',') + ', ' + String(((mz % 16) + 16) % 16).replace('.', ',')}<br>занимает чанков: ${used.n}${used.n ? ` (X ${sgn(used.cx0)}…${sgn(used.cx1)}, Z ${sgn(used.cz0)}…${sgn(used.cz1)})` : ''}`;
     }
     else $('structInfo').textContent = list.length ? (CAN ? 'Структуры закреплены. Двигать — стрелками или включи «Двигать мышью». Клик по строке — выбрать.' : 'Клик по строке — показать.') : '';
   }
@@ -334,11 +334,12 @@
   $('structCentre').onclick = () => {
     if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
     const fp = App.footprint(def, s), [pcx, pcz] = platformCentre(), ddx = Math.round(pcx - (fp.x0 + fp.x1) / 2), ddz = Math.round(pcz - (fp.z0 + fp.z1) / 2);
-    if (isModel(def)) { const tx = s.cx * 16 + (s.dx || 0) + ddx, tz = s.cz * 16 + (s.dz || 0) + ddz; s.cx = Math.round(tx / 16); s.dx = tx - s.cx * 16; s.cz = Math.round(tz / 16); s.dz = tz - s.cz * 16; }
-    else { s.cx += Math.round(ddx / 16); s.cz += Math.round(ddz / 16); }
+    // the structure's centre (the 2×2 middle) always lands in the middle of a chunk: block 8 of the chunk, like every model
+    s.cx += Math.round(ddx / 16); s.cz += Math.round(ddz / 16); s.dx = 0; s.dz = 0;
     App.save('structures'); syncStructures();
-    const f2 = App.footprint(def, s), ox = (f2.x0 + f2.x1) / 2 - pcx, oz = (f2.z0 + f2.z1) / 2 - pcz;
-    App.toast(!ox && !oz ? 'Структура ровно по центру платформы' : `Ближе нельзя: от центра X ${fmtOff(ox)} · Z ${fmtOff(oz)}${isModel(def) ? ' (у модели нечётная ширина)' : ' (заготовка двигается по чанкам)'}`, 4000);
+    const f2 = App.footprint(def, s), ox = (f2.x0 + f2.x1) / 2 - pcx, oz = (f2.z0 + f2.z1) / 2 - pcz, pl = P().platform;
+    App.toast(!ox && !oz ? 'Ровно по центру платформы, центр структуры — в середине чанка'
+      : `Центр структуры — в середине чанка; от центра платформы X ${fmtOff(ox)} · Z ${fmtOff(oz)}.${pl.size % 2 === 0 && isModel(def) ? ' У платформы плана чётное число чанков (' + pl.size + '), её центр на углу чанка. Сделай её нечётной (например ' + (pl.size + 1) + ') во вкладке «Платформа» — и будет ровно.' : ''}`, 7000);
   };
   $('surfGrid').checked = App.pref('plan.surfGrid', true);
   $('surfGrid').onchange = e => { App.setPref('plan.surfGrid', e.target.checked); buildSurfGrid(); };
