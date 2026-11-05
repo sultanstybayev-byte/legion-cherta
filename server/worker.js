@@ -23,7 +23,7 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, list INTEGER NOT NULL, title TEXT NOT NULL, note TEXT, status TEXT NOT NULL DEFAULT 'todo', assignee INTEGER, pos INTEGER NOT NULL DEFAULT 0, author INTEGER, created INTEGER, updated INTEGER)`
 ];
 // columns added after the first release; ALTER fails harmlessly when the column already exists
-const MIGRATIONS = [`ALTER TABLE posts ADD COLUMN images TEXT`, `ALTER TABLE chat ADD COLUMN images TEXT`, `ALTER TABLE chat ADD COLUMN channel TEXT NOT NULL DEFAULT 'hot'`];
+const MIGRATIONS = [`ALTER TABLE users ADD COLUMN prefs TEXT`, `ALTER TABLE posts ADD COLUMN images TEXT`, `ALTER TABLE chat ADD COLUMN images TEXT`, `ALTER TABLE chat ADD COLUMN channel TEXT NOT NULL DEFAULT 'hot'`];
 const CHANNELS = ['talk', 'hot'];
 const IMG_TYPES = { 'image/jpeg': [0xff, 0xd8, 0xff], 'image/png': [0x89, 0x50, 0x4e, 0x47], 'image/webp': [0x52, 0x49, 0x46, 0x46], 'image/gif': [0x47, 0x49, 0x46] };
 const IMG_MAX = 1600000;
@@ -155,17 +155,31 @@ function cleanPlan(p) {
     id: str(t.id, 40, 'id задачи') || String(now()), name: str(t.name, 60, 'Название задачи') || 'Задача', color: color(t.color), note: str(t.note, 600, 'Заметка задачи'),
     chunks: (Array.isArray(t.chunks) ? t.chunks : []).slice(0, 5000).filter(c => Array.isArray(c) && c.length === 2 && c.every(Number.isFinite)).map(c => [Math.trunc(c[0]), Math.trunc(c[1])])
   }));
+  const structures = (Array.isArray(p.structures) ? p.structures : []).slice(0, 300).map(s => ({
+    id: str(s.id, 40, 'id структуры') || String(now()), def: str(s.def, 40, 'тип структуры'), cx: int(s.cx || 0, 'Чанк X'), cz: int(s.cz || 0, 'Чанк Z'), rot: ((Math.trunc(Number(s.rot) || 0) % 4) + 4) % 4 }));
   return {
+    structures,
     platform: { size: int(pl.size || 16, 'Размер платформы', 8, 48), cx0: int(pl.cx0 || 0, 'Чанк X угла'), cz0: int(pl.cz0 || 0, 'Чанк Z угла') },
     base: { placed: !!b.placed, scale: [0.55, 0.75, 1].includes(Number(b.scale)) ? Number(b.scale) : 1, cx: int(b.cx || 0, 'Чанк базы X'), cz: int(b.cz || 0, 'Чанк базы Z'), edits },
     tasks
   };
 }
+function cleanDefs(list) {
+  if (!Array.isArray(list)) fail(400, 'Нужен список структур');
+  let total = 0;
+  return list.slice(0, 100).map(d => {
+    const edits = Array.isArray(d.edits) ? d.edits.filter(e => Array.isArray(e) && e.length === 4 && e.every(Number.isFinite)).map(e => e.map(v => Math.trunc(v))) : [];
+    total += edits.length; if (total > 200000) fail(413, 'Слишком много правок в структурах');
+    return { id: str(d.id, 40, 'id') || String(now()), name: str(d.name, 60, 'Название') || 'Структура', kind: d.kind === 'lotus' ? 'lotus' : 'box',
+      scale: [0.55, 0.75, 1].includes(Number(d.scale)) ? Number(d.scale) : 1, edits,
+      w: int(d.w || 1, 'Ширина', 1, 32), d: int(d.d || 1, 'Глубина', 1, 32), h: int(d.h || 8, 'Высота', 1, 320), color: color(d.color), note: str(d.note, 600, 'Заметка') };
+  });
+}
 async function world(env) {
-  const [meta, maps, plan, rows] = await Promise.all([kvGet(env, 'meta', DEFAULT_META), kvGet(env, 'maps', DEFAULT_MAPS), kvGet(env, 'plan', DEFAULT_PLAN),
-    env.DB.prepare('SELECT * FROM markers ORDER BY created').all()]);
+  const [meta, maps, plan, rows, structdefs] = await Promise.all([kvGet(env, 'meta', DEFAULT_META), kvGet(env, 'maps', DEFAULT_MAPS), kvGet(env, 'plan', DEFAULT_PLAN),
+    env.DB.prepare('SELECT * FROM markers ORDER BY created').all(), kvGet(env, 'structdefs', null)]);
   const markers = rows.results.map(r => Object.assign(JSON.parse(r.data), { id: r.id, owner: r.owner, created: r.created, updated: r.updated }));
-  return { version: 1, name: meta.name, seed: meta.seed, savedAt: 0, maps, plan, markers, users: await usersById(env, markers.map(m => m.owner)) };
+  return { version: 1, name: meta.name, seed: meta.seed, savedAt: 0, maps, plan, structdefs, markers, users: await usersById(env, markers.map(m => m.owner)) };
 }
 
 /* ---------- router ---------- */
@@ -196,7 +210,13 @@ async function route(req, env) {
     if (m) await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(await sha256(m[1])).run();
     return { ok: true };
   }
-  if (r[0] === 'me' && M === 'GET') return { user: publicUser(me, env), meta: await kvGet(env, 'meta', DEFAULT_META) };
+  if (r[0] === 'me' && M === 'GET') { let prefs = {}; try { prefs = me && me.prefs ? JSON.parse(me.prefs) : {}; } catch (e) { } return { user: publicUser(me, env), prefs, meta: await kvGet(env, 'meta', DEFAULT_META) }; }
+  if (r[0] === 'prefs' && M === 'PUT') {
+    if (!me) fail(401, 'Нужно войти через Telegram');
+    const b = await body(req, 4000); if (!b || typeof b !== 'object' || Array.isArray(b)) fail(400, 'Неверные настройки');
+    const clean = {}; for (const [k, v] of Object.entries(b).slice(0, 40)) if (/^[a-zA-Z0-9_.-]{1,40}$/.test(k) && ['string', 'number', 'boolean'].includes(typeof v)) clean[k] = typeof v === 'string' ? v.slice(0, 200) : v;
+    await env.DB.prepare('UPDATE users SET prefs = ? WHERE id = ?').bind(JSON.stringify(clean), me.id).run(); return { prefs: clean };
+  }
 
   /* world: markers, maps, plan, meta */
   if (r[0] === 'world' && M === 'GET') return world(env);
@@ -223,6 +243,7 @@ async function route(req, env) {
     await env.DB.prepare('DELETE FROM markers WHERE id = ?').bind(id).run(); return { ok: true };
   }
   if (r[0] === 'plan' && M === 'PUT') { need.level(me, env, 'moderator', 'План меняют только модераторы'); const plan = cleanPlan(await body(req, 3000000)); await kvSet(env, 'plan', plan); return { plan }; }
+  if (r[0] === 'structdefs' && M === 'PUT') { need.level(me, env, 'moderator', 'Структуры меняют только модераторы'); const defs = cleanDefs(await body(req, 3000000)); await kvSet(env, 'structdefs', defs); return { structdefs: defs }; }
   if (r[0] === 'maps' && M === 'PUT') { need.level(me, env, 'moderator', 'Картинку карты меняют только модераторы'); const maps = cleanMaps(await body(req, 8000)); await kvSet(env, 'maps', maps); return { maps }; }
   if (r[0] === 'meta' && M === 'PUT') { need.level(me, env, 'owner', 'Только владелец'); const b = await body(req, 4000); const meta = { name: str(b.name, 60, 'Название') || 'Мир', seed: str(b.seed, 40, 'Сид') }; await kvSet(env, 'meta', meta); return { meta }; }
   if (r[0] === 'export' && M === 'GET') {
@@ -237,6 +258,7 @@ async function route(req, env) {
     if (w.name !== undefined) await kvSet(env, 'meta', { name: str(w.name, 60, 'Название') || 'Мир', seed: str(w.seed, 40, 'Сид') });
     if (w.maps) await kvSet(env, 'maps', cleanMaps(w.maps));
     if (w.plan) await kvSet(env, 'plan', cleanPlan(w.plan));
+    if (Array.isArray(w.structdefs)) await kvSet(env, 'structdefs', cleanDefs(w.structdefs));
     let n = 0;
     if (Array.isArray(w.markers)) {
       const st = [];

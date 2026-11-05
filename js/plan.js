@@ -13,7 +13,6 @@
   const SW = ['#e07b2a', '#c0392b', '#d4ac0d', '#27ae60', '#16a085', '#2e86c1', '#7d3c98', '#d35490', '#6e2c00', '#5d6d7e'];
   const key = (cx, cz) => cx + ',' + cz;
   const sel = new Set();
-  let baseHidden = false; try { baseHidden = localStorage.getItem('mcmap.baseHidden') === '1'; } catch (e) { }
 
   if (!window.THREE) { $('stage').innerHTML = '<div class="banner"><h3>3D не загрузился</h3><p class="note">Не удалось загрузить three.js. Проверь интернет и обнови страницу.</p></div>'; return; }
 
@@ -132,48 +131,129 @@
   }
   function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
 
-  /* ---------- base ---------- */
-  let base = { L: null, scale: null, edKey: '', mesh: null };
-  function baseOrigin() { const b = P().base; return { ox: b.cx * 16 + 8, oz: b.cz * 16 + 8 }; }
-  function ensureBase(cb) {
-    const b = P().base, edKey = b.scale + ':' + JSON.stringify(b.edits || []).length + ':' + (b.edits || []).length;
-    if (!b.placed) { if (base.mesh) base.mesh.visible = false; cb && cb(); return; }
-    if (base.L && base.scale === b.scale && base.edKey === edKey) { placeBase(); cb && cb(); return; }
-    $('busy').hidden = false;
-    setTimeout(() => {
-      const L = generateLotus(b.scale);
-      for (const e of b.edits || []) if (Array.isArray(e) && e.length === 4) L.set(e[0] | 0, e[1] | 0, e[2] | 0, e[3] | 0);
-      base.L = L; base.scale = b.scale; base.edKey = edKey;
-      buildBaseMesh(); placeBase(); $('busy').hidden = true; cb && cb();
-    }, 30);
-  }
-  function buildBaseMesh() {
-    const L = base.L, N = L.N, list = [];
-    const occ = (x, y, z) => L.get(x, y, z) > 0;
+  /* ---------- structures placed on the platform ---------- */
+  const defs = () => W().structdefs, insts = () => P().structures;
+  const defOf = id => defs().find(d => d.id === id);
+  const lotusCache = new Map();          // def id -> { key, L, n, mat, col }
+  const meshes = new Map();              // instance id -> Object3D
+  let selStruct = null, selBox = null;
+  const lotusKey = d => d.scale + ':' + (d.edits || []).length + ':' + JSON.stringify((d.edits || []).slice(-3));
+  function lotusData(def) {
+    const k = lotusKey(def), c = lotusCache.get(def.id); if (c && c.key === k) return c;
+    const L = generateLotus(def.scale);
+    for (const e of def.edits || []) if (Array.isArray(e) && e.length === 4) L.set(e[0] | 0, e[1] | 0, e[2] | 0, e[3] | 0);
+    const N = L.N, list = [], occ = (x, y, z) => L.get(x, y, z) > 0;
     for (let y = 0; y < L.H; y++) for (let z = -N; z <= N; z++) for (let x = -N; x <= N; x++) {
       const m = L.get(x, y, z); if (!m) continue;
       if (occ(x + 1, y, z) && occ(x - 1, y, z) && occ(x, y + 1, z) && occ(x, y - 1, z) && occ(x, y, z + 1) && occ(x, y, z - 1)) continue;
       list.push(x, y, z, m);
     }
-    if (base.mesh) { scene.remove(base.mesh); base.mesh.dispose && base.mesh.dispose(); }
-    const n = list.length / 4;
-    base.mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, n));
-    for (let i = 0; i < n; i++) { tmpM.makeTranslation(list[4 * i] + .5, list[4 * i + 1] + .5, list[4 * i + 2] + .5); base.mesh.setMatrixAt(i, tmpM); base.mesh.setColorAt(i, tmpC.set(MATS[list[4 * i + 3]] || '#dddddd')); }
-    base.mesh.count = n; scene.add(base.mesh);
+    const n = list.length / 4, mat = new Float32Array(n * 16), col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { tmpM.makeTranslation(list[4 * i] + .5, list[4 * i + 1] + .5, list[4 * i + 2] + .5); tmpM.toArray(mat, i * 16); tmpC.set(MATS[list[4 * i + 3]] || '#dddddd'); col.set([tmpC.r, tmpC.g, tmpC.b], i * 3); }
+    const out = { key: k, L, n, mat, col }; lotusCache.set(def.id, out); return out;
   }
-  function placeBase() {
-    if (!base.mesh) return; const b = P().base, { ox, oz } = baseOrigin();
-    base.mesh.position.set(ox, 0, oz); base.mesh.visible = b.placed && !baseHidden; renderBaseInfo(); redraw();
+  const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+  function makeMesh(def, s) {
+    if (def.kind === 'lotus') {
+      const c = lotusData(def), m = new THREE.InstancedMesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, c.n));
+      m.instanceMatrix.array.set(c.mat); m.instanceMatrix.needsUpdate = true;
+      m.instanceColor = new THREE.InstancedBufferAttribute(c.col.slice(), 3); m.count = c.n; return m;
+    }
+    const g = new THREE.Group(), fp = App.footprint(def, s), w = fp.x1 - fp.x0, d = fp.z1 - fp.z0;
+    const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: new THREE.Color(def.color), transparent: true, opacity: .55 }));
+    body.scale.set(w - 0.4, def.h, d - 0.4); body.position.set(0, def.h / 2, 0); g.add(body);
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w - 0.4, def.h, d - 0.4)), new THREE.LineBasicMaterial({ color: new THREE.Color(def.color) }));
+    edges.position.set(0, def.h / 2, 0); g.add(edges); return g;
   }
-  function renderBaseInfo() {
-    const b = P().base, pl = P().platform, N = App.BASE_N[String(b.scale)] || 73, { ox, oz } = baseOrigin();
-    const c0x = App.chunkOf(ox - N), c1x = App.chunkOf(ox + N), c0z = App.chunkOf(oz - N), c1z = App.chunkOf(oz + N);
-    const out = c0x < pl.cx0 || c0z < pl.cz0 || c1x > pl.cx0 + pl.size - 1 || c1z > pl.cz0 + pl.size - 1;
-    $('baseInfo').innerHTML = b.placed
-      ? `Центр: X ${sgn(ox)} · Z ${sgn(oz)}<br>чанк ${sgn(b.cx)}, ${sgn(b.cz)}, внутри 8, 8<br>занимает чанки X ${sgn(c0x)}…${sgn(c1x)}, Z ${sgn(c0z)}…${sgn(c1z)}${out ? '<br><b style="color:var(--danger)">Выходит за платформу</b>' : ''}`
-      : 'База не стоит на платформе.';
-    const ne = (b.edits || []).length; $('editsInfo').textContent = ne ? `Твои правки применены: ${fmt(ne)}.` : 'Правок нет: стоит исходная модель.';
+  function disposeObj(o) { o.traverse(x => { if (x.geometry && x.geometry !== boxGeo) x.geometry.dispose(); if (x.material) x.material.dispose(); }); }
+  function syncStructures() {
+    const hidden = App.pref('plan.hidden', false), need = insts().filter(s => defOf(s.def));
+    const wantLotus = need.some(s => { const d = defOf(s.def); return d.kind === 'lotus' && (!lotusCache.get(d.id) || lotusCache.get(d.id).key !== lotusKey(d)); });
+    const go = () => {
+      for (const [id, o] of meshes) { scene.remove(o); disposeObj(o); } meshes.clear();
+      for (const s of need) {
+        const def = defOf(s.def), o = makeMesh(def, s), fp = App.footprint(def, s);
+        if (def.kind === 'lotus') { o.position.set(fp.ox, 0, fp.oz); o.rotation.y = -(s.rot || 0) * Math.PI / 2; } else o.position.set((fp.x0 + fp.x1) / 2, 0, (fp.z0 + fp.z1) / 2);
+        o.visible = !hidden; o.userData.sid = s.id; scene.add(o); meshes.set(s.id, o);
+      }
+      drawSelBox(); renderStructs(); redraw();
+    };
+    if (wantLotus) { $('busy').hidden = false; setTimeout(() => { go(); $('busy').hidden = true; }, 30); } else go();
   }
+  function drawSelBox() {
+    if (selBox) { scene.remove(selBox); disposeObj(selBox); selBox = null; }
+    const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
+    const fp = App.footprint(def, s), h = def.kind === 'lotus' ? (lotusCache.get(def.id) || { L: { H: 80 } }).L.H : def.h;
+    selBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(fp.x1 - fp.x0, h + 1, fp.z1 - fp.z0)), new THREE.LineBasicMaterial({ color: new THREE.Color(css('--accent') || '#e07b2a'), depthTest: false }));
+    selBox.position.set((fp.x0 + fp.x1) / 2, (h + 1) / 2, (fp.z0 + fp.z1) / 2); selBox.renderOrder = 6; scene.add(selBox);
+  }
+  // which structure covers a block column, and the solid test used for picking
+  function solidAt(x, y, z) {
+    for (const s of insts()) {
+      const def = defOf(s.def); if (!def) continue; const fp = App.footprint(def, s);
+      if (x < fp.x0 - 1 || x > fp.x1 || z < fp.z0 - 1 || z > fp.z1) continue;
+      if (def.kind === 'lotus') {
+        const c = lotusCache.get(def.id); if (!c) continue;
+        const a = (s.rot || 0) * Math.PI / 2, wx = x + .5 - fp.ox, wz = z + .5 - fp.oz;
+        const lx = Math.floor(wx * Math.cos(a) + wz * Math.sin(a) + 1e-6), lz = Math.floor(-wx * Math.sin(a) + wz * Math.cos(a) + 1e-6);
+        if (c.L.get(lx, y, lz)) return s;
+      } else if (x >= fp.x0 && x < fp.x1 && z >= fp.z0 && z < fp.z1 && y >= 0 && y < def.h) return s;
+    }
+    return null;
+  }
+  function structAtChunk(cx, cz) { for (const s of insts()) { const def = defOf(s.def); if (!def) continue; const fp = App.footprint(def, s); if (cx * 16 + 8 >= fp.x0 && cx * 16 + 8 < fp.x1 && cz * 16 + 8 >= fp.z0 && cz * 16 + 8 < fp.z1) return s; } return null; }
+
+  /* structures panel */
+  function renderStructs() {
+    const list = insts(), pl = P().platform;
+    $('structCount').textContent = list.length ? String(list.length) : '';
+    $('defPick').innerHTML = defs().map(d => `<option value="${esc(d.id)}">${esc(d.name)} — ${d.kind === 'lotus' ? 'модель' : `${d.w}×${d.d} чанк., ${d.h} бл.`}</option>`).join('');
+    $('placedList').innerHTML = list.length ? list.map(s => {
+      const def = defOf(s.def); if (!def) return '';
+      const fp = App.footprint(def, s), out = fp.x0 < pl.cx0 * 16 || fp.z0 < pl.cz0 * 16 || fp.x1 > (pl.cx0 + pl.size) * 16 || fp.z1 > (pl.cz0 + pl.size) * 16;
+      return `<div class="item" data-sid="${esc(s.id)}" role="button" tabindex="0" ${s.id === selStruct ? 'style="background:var(--accent-soft)"' : ''}><span style="width:18px;height:18px;border-radius:5px;background:${esc(def.color)}"></span><span class="t">${esc(def.name)}</span><span class="c">чанк ${sgn(s.cx)}, ${sgn(s.cz)}${s.rot ? ' · поворот ' + s.rot * 90 + '°' : ''}${out ? ' · за краем платформы' : ''}</span></div>`;
+    }).join('') : '<div class="empty">На платформе пока пусто. Выбери структуру выше и нажми «Поставить».</div>';
+    const s = list.find(q => q.id === selStruct), def = s && defOf(s.def);
+    $('structEdit').hidden = !s || !CAN; $('structEdit').style.display = $('structEdit').hidden ? 'none' : 'flex';
+    if (s && def) { const fp = App.footprint(def, s); $('structInfo').innerHTML = `<b>${esc(def.name)}</b><br>центр X ${sgn(Math.floor(fp.ox))} · Z ${sgn(Math.floor(fp.oz))}<br>чанки X ${sgn(App.chunkOf(fp.x0))}…${sgn(App.chunkOf(fp.x1 - 1))}, Z ${sgn(App.chunkOf(fp.z0))}…${sgn(App.chunkOf(fp.z1 - 1))}`; }
+    else $('structInfo').textContent = list.length ? 'Выбери структуру в списке, чтобы двигать её.' : '';
+  }
+  function selectStruct(id, fly) {
+    selStruct = id; drawSelBox(); renderStructs(); showTab('structs');
+    const s = insts().find(q => q.id === id), def = s && defOf(s.def);
+    if (fly && def) { const fp = App.footprint(def, s), sz = Math.max(fp.x1 - fp.x0, fp.z1 - fp.z0); cam.x = fp.ox + sz * .5; cam.z = fp.oz + sz * 1.3; cam.y = sz * .6 + 10; const dx = fp.ox - cam.x, dz = fp.oz - cam.z, dy = 10 - cam.y; cam.yaw = Math.atan2(-dx, -dz); cam.pitch = Math.atan2(dy, Math.hypot(dx, dz)); }
+    redraw();
+  }
+  $('placedList').addEventListener('click', e => { const it = e.target.closest('[data-sid]'); if (it) selectStruct(it.dataset.sid, true); });
+  $('placeBtn').onclick = () => {
+    if (!CAN && deny()) return;
+    const def = defOf($('defPick').value); if (!def) return;
+    const cs = selChunks(), pl = P().platform;
+    let cx = cs.length === 1 ? cs[0][0] : pl.cx0 + Math.floor(pl.size / 2), cz = cs.length === 1 ? cs[0][1] : pl.cz0 + Math.floor(pl.size / 2);
+    if (def.kind !== 'lotus' && cs.length !== 1) { cx -= Math.floor(def.w / 2); cz -= Math.floor(def.d / 2); }
+    const s = { id: uid(), def: def.id, cx, cz, rot: 0 }; insts().push(s);
+    App.save('structures'); syncStructures(); selectStruct(s.id, true);
+    App.toast(`«${def.name}» поставлена. Двигай стрелками в этой вкладке.`);
+  };
+  document.querySelectorAll('[data-smove]').forEach(btn => btn.onclick = () => {
+    if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct); if (!s) return;
+    const [dx, dz] = btn.dataset.smove.split(',').map(Number); s.cx += dx; s.cz += dz; App.save('structures'); syncStructures();
+  });
+  $('structRot').onclick = () => { if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct); if (!s) return; s.rot = ((s.rot || 0) + 1) % 4; App.save('structures'); syncStructures(); };
+  $('structToSel').onclick = () => {
+    if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct); const cs = selChunks();
+    if (!s) return; if (cs.length !== 1) { App.toast('Выбери на платформе один чанк — туда встанет структура'); return; }
+    s.cx = cs[0][0]; s.cz = cs[0][1]; App.save('structures'); syncStructures();
+  };
+  let sDelArm = 0;
+  $('structDel').onclick = () => {
+    if (!CAN && deny()) return;
+    if (Date.now() - sDelArm > 3000) { sDelArm = Date.now(); $('structDel').textContent = 'Точно убрать?'; return; }
+    P().structures = insts().filter(q => q.id !== selStruct); selStruct = null; $('structDel').textContent = 'Убрать с платформы';
+    App.save('structures'); syncStructures();
+  };
+  $('structHidden').checked = App.pref('plan.hidden', false);
+  $('structHidden').onchange = e => { App.setPref('plan.hidden', e.target.checked); for (const o of meshes.values()) o.visible = !e.target.checked; redraw(); };
 
   /* ---------- camera control: drag to look, WASD to fly, click to pick ---------- */
   const look = (dx, dy) => { cam.yaw -= dx * 0.0026; cam.pitch = Math.min(1.5707, Math.max(-1.5707, cam.pitch - dy * 0.0026)); redraw(); };
@@ -253,13 +333,12 @@
     const v = new THREE.Vector3(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1, 0.5).unproject(camera);
     const o = camera.position.clone(), d = v.sub(o).normalize();
     let hit = null;
-    if (base.L && P().base.placed && !baseHidden) {
-      const { ox, oz } = baseOrigin(); const L = base.L;
+    if (insts().length && !App.pref('plan.hidden', false)) {
       let x = Math.floor(o.x), y = Math.floor(o.y), z = Math.floor(o.z);
       const sx = d.x > 0 ? 1 : -1, sy = d.y > 0 ? 1 : -1, sz = d.z > 0 ? 1 : -1, tdx = Math.abs(1 / d.x), tdy = Math.abs(1 / d.y), tdz = Math.abs(1 / d.z);
       let tx = (d.x > 0 ? (x + 1 - o.x) : (o.x - x)) * tdx, ty = (d.y > 0 ? (y + 1 - o.y) : (o.y - y)) * tdy, tz = (d.z > 0 ? (z + 1 - o.z) : (o.z - z)) * tdz;
       for (let i = 0; i < 3000; i++) {
-        if (L.get(x - ox, y, z - oz)) { hit = { x, z }; break; }
+        if (y >= 0 && y < 400 && solidAt(x, y, z)) { hit = { x, z }; break; }
         if (tx < ty && tx < tz) { x += sx; tx += tdx; } else if (ty < tz) { y += sy; ty += tdy; } else { z += sz; tz += tdz; }
         if (y < -1 || Math.min(tx, ty, tz) > 2500) break;
       }
@@ -290,6 +369,7 @@
     $('selInfo').innerHTML = cs.length === 1
       ? `Чанк <b class="mono">${sgn(x0)}, ${sgn(z0)}</b>: блоки X <span class="mono">${sgn(x0 * 16)}…${sgn(x0 * 16 + 15)}</span>, Z <span class="mono">${sgn(z0 * 16)}…${sgn(z0 * 16 + 15)}</span>`
       : `${cs.length} чанков в области X <span class="mono">${sgn(x0 * 16)}…${sgn(x1 * 16 + 15)}</span>, Z <span class="mono">${sgn(z0 * 16)}…${sgn(z1 * 16 + 15)}</span>`;
+    if (cs.length === 1) { const st = structAtChunk(cs[0][0], cs[0][1]); if (st && defOf(st.def)) $('selInfo').innerHTML += `<br>Здесь стоит <a href="#" data-pickstruct="${esc(st.id)}">${esc(defOf(st.def).name)}</a>`; }
     if (!CAN) { const ts0 = [...new Set(cs.map(c => taskOf.get(key(c[0], c[1]))).filter(Boolean))]; $('selInfo').innerHTML += ts0.length ? '<br>' + ts0.map(t => `<b>${esc(t.name)}</b>${t.note ? ': ' + esc(t.note) : ''}`).join('<br>') : '<br>Задачи нет.'; return; }
     const ts = new Set(cs.map(c => taskOf.get(key(c[0], c[1])) || null));
     const real = [...ts].filter(Boolean), free = cs.filter(c => !taskOf.get(key(c[0], c[1]))).length;
@@ -311,6 +391,7 @@
     $('assignBtn').textContent = !t ? 'Создать задачу на эти чанки' : selMode === 'merge' ? 'Объединить в эту задачу' : selMode === 'extend' ? 'Добавить чанки к задаче' : 'Сохранить задачу';
   }
   $('taskPick').onchange = fillTaskFields;
+  $('selInfo').addEventListener('click', e => { const a = e.target.closest('[data-pickstruct]'); if (a) { e.preventDefault(); selectStruct(a.dataset.pickstruct, false); } });
   function dropChunks(chunks) { const ks = new Set(chunks.map(c => key(c[0], c[1]))); for (const t of P().tasks) t.chunks = t.chunks.filter(c => !ks.has(key(c[0], c[1]))); }
   $('assignBtn').onclick = () => {
     if (!CAN && deny()) return;
@@ -343,60 +424,35 @@
     let sx = 0, sz = 0; for (const [cx, cz] of t.chunks) { sx += cx * 16 + 8; sz += cz * 16 + 8; }
     topView(sx / t.chunks.length, sz / t.chunks.length, Math.max(80, Math.sqrt(t.chunks.length) * 60));
   });
-  $('volume').onchange = () => { buildTaskLines(); buildVolume(); redraw(); };
-
-  /* ---------- base panel ---------- */
-  $('baseScale').innerHTML = App.SCALES.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
-  function renderBasePanel() { const b = P().base; $('basePlaced').checked = !!b.placed; $('baseHidden').checked = baseHidden; $('baseScale').value = String(b.scale); renderBaseInfo(); }
-  $('basePlaced').onchange = e => { if (!CAN) { e.target.checked = !e.target.checked; deny(); return; } P().base.placed = e.target.checked; App.save('base'); ensureBase(placeBase); renderBaseInfo(); };
-  $('baseHidden').onchange = e => { baseHidden = e.target.checked; try { localStorage.setItem('mcmap.baseHidden', baseHidden ? '1' : '0'); } catch (er) { } placeBase(); };
-  $('baseScale').onchange = e => {
-    if (!CAN) { e.target.value = String(P().base.scale); deny(); return; }
-    const s = +e.target.value, b = P().base;
-    if (b.edits && b.edits.length) App.toast('Правки сделаны для другого масштаба и могут лечь не туда. Вставь правки этого масштаба со страницы базы.', 6000);
-    b.scale = s; App.save('base'); ensureBase(placeBase);
-  };
-  document.querySelectorAll('[data-move]').forEach(btn => btn.onclick = () => { if (!CAN && deny()) return; const [dx, dz] = btn.dataset.move.split(',').map(Number); P().base.cx += dx; P().base.cz += dz; App.save('base'); placeBase(); });
-  $('baseToSel').onclick = () => { if (!CAN && deny()) return; const cs = selChunks(); if (cs.length !== 1) { App.toast('Выбери один чанк — туда встанет центр базы'); return; } P().base.cx = cs[0][0]; P().base.cz = cs[0][1]; P().base.placed = true; App.save('base'); renderBasePanel(); ensureBase(placeBase); };
-
-  $('importBase').onclick = () => { if (!CAN && deny()) return; $('importText').value = ''; $('importMsg').textContent = ''; $('importDlg').showModal(); $('importText').focus(); };
-  $('importDlg').querySelector('[data-close]').onclick = () => $('importDlg').close();
-  $('importOk').onclick = () => {
-    let j; try { j = JSON.parse($('importText').value); } catch (e) { $('importMsg').textContent = 'Не получилось прочитать текст. Скопируй его целиком ещё раз.'; return; }
-    if (!j || j.kind !== 'lotus-base' || !Array.isArray(j.edits)) { $('importMsg').textContent = 'Это не данные базы. Нужна кнопка «Скопировать для планировщика» на странице «Лотос Легиона».'; return; }
-    const s = [0.55, 0.75, 1].includes(+j.scale) ? +j.scale : 1;
-    P().base.scale = s; P().base.edits = j.edits.filter(e => Array.isArray(e) && e.length === 4 && e.every(Number.isFinite)); P().base.placed = true;
-    App.save('base'); $('importDlg').close(); renderBasePanel(); ensureBase(placeBase); App.toast(`Правки применены: ${fmt(P().base.edits.length)} блоков`);
-  };
-  $('importClear').onclick = () => { P().base.edits = []; App.save('base'); $('importDlg').close(); ensureBase(placeBase); App.toast('Правки убраны, стоит исходная база'); };
+  $('volume').checked = App.pref('plan.volume', false);
+  $('volume').onchange = e => { App.setPref('plan.volume', e.target.checked); buildTaskLines(); buildVolume(); redraw(); };
 
   /* ---------- platform panel ---------- */
   function renderPlatform() { const pl = P().platform; $('plSize').value = pl.size; $('plCX').value = pl.cx0; $('plCZ').value = pl.cz0;
     $('plInfo').innerHTML = `${pl.size}×${pl.size} чанков = ${pl.size * 16}×${pl.size * 16} блоков<br>X ${sgn(pl.cx0 * 16)}…${sgn((pl.cx0 + pl.size) * 16 - 1)}, Z ${sgn(pl.cz0 * 16)}…${sgn((pl.cz0 + pl.size) * 16 - 1)}`; }
   $('plApply').onclick = () => { if (!CAN && deny()) return; const pl = P().platform; pl.size = Math.min(48, Math.max(8, Math.round(+$('plSize').value || 16))); pl.cx0 = Math.round(+$('plCX').value || 0); pl.cz0 = Math.round(+$('plCZ').value || 0); App.save('platform'); refreshAll(); };
-  $('plCenter').onclick = () => { if (!CAN && deny()) return; const pl = P().platform, b = P().base; pl.cx0 = b.cx - Math.floor(pl.size / 2); pl.cz0 = b.cz - Math.floor(pl.size / 2); App.save('platform'); refreshAll(); };
+  $('plCenter').onclick = () => { if (!CAN && deny()) return; const pl = P().platform; pl.cx0 = -Math.floor(pl.size / 2); pl.cz0 = -Math.floor(pl.size / 2); App.save('platform'); refreshAll(); };
 
   /* ---------- views ---------- */
   function topView(x, z, h) { const pl = P().platform; cam.x = x ?? (pl.cx0 + pl.size / 2) * 16; cam.z = z ?? (pl.cz0 + pl.size / 2) * 16; cam.y = h ?? pl.size * 16 * 0.95; cam.yaw = 0; cam.pitch = -1.5707; redraw(); }
   function overview() { const pl = P().platform, c = (pl.size * 16), mx = (pl.cx0 + pl.size / 2) * 16, mz = (pl.cz0 + pl.size / 2) * 16; cam.x = mx + c * .55; cam.z = mz + c * .75; cam.y = c * .5; const dx = mx - cam.x, dz = mz - cam.z, dy = 20 - cam.y; cam.yaw = Math.atan2(-dx, -dz); cam.pitch = Math.atan2(dy, Math.hypot(dx, dz)); redraw(); }
   $('topView').onclick = () => topView(); $('sideView').onclick = overview;
-  $('toBase').onclick = () => { const { ox, oz } = baseOrigin(); cam.x = ox + 60; cam.z = oz + 150; cam.y = 50; const dx = ox - cam.x, dz = oz - cam.z, dy = 35 - cam.y; cam.yaw = Math.atan2(-dx, -dz); cam.pitch = Math.atan2(dy, Math.hypot(dx, dz)); redraw(); };
   $('fullBtn').onclick = () => { try { const p = document.fullscreenElement ? document.exitFullscreen() : $('stage').requestFullscreen(); p && p.catch && p.catch(() => App.toast('Полный экран здесь не поддерживается')); } catch (e) { App.toast('Полный экран здесь не поддерживается'); } };
   document.addEventListener('fullscreenchange', () => { $('fullBtn').textContent = document.fullscreenElement ? 'Выйти из полного экрана' : 'Во весь экран'; });
 
-  function refreshAll() { sel.clear(); buildGround(); renderPlatform(); renderBasePanel(); renderSel(); renderTasks(); ensureBase(placeBase); }
+  function refreshAll() { sel.clear(); buildGround(); renderPlatform(); renderSel(); renderTasks(); syncStructures(); }
   App.onChange(why => { if (why === 'import' || why === 'replace' || why === 'settings') refreshAll(); });
   const mq = window.matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener && mq.addEventListener('change', () => colorGround());
+  window.addEventListener('themechange', () => { colorGround(); redraw(); });
 
   if (!CAN) {
-    ['importBase', 'baseToSel', 'plApply', 'plCenter'].forEach(id => $(id).hidden = true);
-    document.querySelectorAll('[data-move]').forEach(b => b.hidden = true);
-    ['plSize', 'plCX', 'plCZ', 'baseScale'].forEach(id => $(id).disabled = true);
-    $('selInfo').insertAdjacentHTML('afterend', '<p class="note">Размечать чанки и двигать базу могут модераторы. Ты можешь смотреть и выбирать чанки, чтобы прочитать задачу.</p>');
+    ['plApply', 'plCenter', 'placeRow'].forEach(id => $(id).hidden = true);
+    ['plSize', 'plCX', 'plCZ'].forEach(id => $(id).disabled = true);
+    $('selInfo').insertAdjacentHTML('afterend', '<p class="note">Размечать чанки и ставить структуры могут модераторы. Ты можешь смотреть и выбирать чанки, чтобы прочитать задачу.</p>');
   }
   if (App.mode === 'server' && !CAN) App.every(async () => {
     const w = await App.api('GET', '/api/world'); if (JSON.stringify(w.plan) === JSON.stringify(P())) return;
-    App.world.plan = w.plan; const keep = [...sel]; refreshAll(); keep.forEach(k => sel.add(k)); colorGround(); renderSel();
+    App.world.plan = w.plan; if (w.structdefs) App.world.structdefs = w.structdefs; const keep = [...sel]; refreshAll(); keep.forEach(k => sel.add(k)); colorGround(); renderSel();
   }, 60000);
   resize(); refreshAll(); overview();
 })();

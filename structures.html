@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Структуры</title>
+<script>/* theme before first paint: saved choice, dark by default */ try { document.documentElement.dataset.theme = localStorage.getItem("mcmap.theme") || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <main class="stage" id="stage">
+    <canvas id="view" aria-label="3D-просмотр структуры" style="display:block;width:100%;height:100%;touch-action:none;cursor:grab"></canvas>
+    <div class="hud" id="hud">Тяни мышью — вращать · колесо — приблизить · <span id="dims"></span></div>
+    <div class="banner" id="busy" hidden><h3>Считаю модель…</h3><p class="note">Большая структура, это пара секунд.</p></div>
+  </main>
+  <aside class="side" aria-label="Библиотека структур">
+    <section class="sec">
+      <h2>Библиотека структур</h2>
+      <p class="note">Постройки, которые ставятся на платформу в «Плане базы». Здесь мы их дорабатываем: размеры, модель, правки.</p>
+      <div class="row" id="addRow"><button class="btn primary" id="addDef">+ Новая заготовка</button></div>
+    </section>
+    <div class="list" id="defList"></div>
+    <section class="sec" id="editor" hidden>
+      <h2 id="edHead">Структура</h2>
+      <label class="f">Название<input type="text" id="dName" maxlength="60"></label>
+      <div class="row"><label class="f">Цвет<input type="color" id="dColor"></label><p class="note grow" id="dKind"></p></div>
+      <div class="coords3" id="boxDims">
+        <label class="f">Ширина, чанков<input type="number" id="dW" min="1" max="32" step="1"></label>
+        <label class="f">Глубина, чанков<input type="number" id="dD" min="1" max="32" step="1"></label>
+        <label class="f">Высота, блоков<input type="number" id="dH" min="1" max="320" step="1"></label>
+      </div>
+      <div id="lotusOpts" style="display:flex;flex-direction:column;gap:10px">
+        <label class="f">Масштаб<select id="dScale"></select></label>
+        <p class="note" id="dEdits"></p>
+        <div class="row"><button class="btn" id="importEdits">Вставить правки со страницы «Лотос Легиона»…</button><button class="btn" id="clearEdits">Убрать правки</button></div>
+      </div>
+      <label class="f">Заметка<textarea id="dNote" maxlength="600" placeholder="что это, из чего строить, что доработать"></textarea></label>
+      <div class="row" id="edButtons"><button class="btn primary" id="dSave">Сохранить</button><span class="spacer"></span><button class="btn danger" id="dDel">Удалить</button></div>
+    </section>
+  </aside>
+</div>
+<dialog id="importDlg">
+  <div class="dh"><h2>Правки модели</h2><button class="btn sm" data-close>Закрыть</button></div>
+  <div class="db">
+    <p class="note">На странице «Лотос Легиона» нажми <b>«Скопировать для планировщика»</b> и вставь сюда то, что скопировалось.</p>
+    <textarea id="importText" style="min-height:160px" class="mono" placeholder='{"kind":"lotus-base", …}'></textarea>
+    <p class="note" id="importMsg"></p>
+  </div>
+  <div class="df"><button class="btn primary" id="importOk">Применить</button></div>
+</dialog>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/common.js"></script>
+<script src="js/lotus.js"></script>
+<script src="js/structures.js"></script>
+</body>
+</html>

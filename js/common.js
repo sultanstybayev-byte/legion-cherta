@@ -13,6 +13,10 @@
   const read = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
   const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } };
   const ROLE_RU = { owner: 'Владелец', moderator: 'Модератор', member: 'Участник', guest: 'Гость' };
+  /* per-person settings: kept in this browser and, after sign-in, on the server so they follow the person */
+  let prefs = read('mcmap.prefs', {}); if (!prefs || typeof prefs !== 'object') prefs = {};
+  const applyTheme = t => { document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark'; try { localStorage.setItem('mcmap.theme', document.documentElement.dataset.theme); } catch (e) { } };
+  try { applyTheme(prefs.theme || localStorage.getItem('mcmap.theme') || 'dark'); } catch (e) { applyTheme('dark'); }
   const LV = { anon: -1, guest: 0, member: 1, moderator: 2, owner: 3 };
 
   function defaults() {
@@ -30,8 +34,10 @@
     for (const k of ['overworld', 'nether', 'end']) out.maps[k] = Object.assign({ image: '', x: 0, z: 0, bpp: 1 }, out.maps[k] || {});
     out.markers = Array.isArray(w.markers) ? w.markers.filter(m => m && isFinite(m.x) && isFinite(m.z)) : [];
     const p = w.plan || {};
-    out.plan = { platform: Object.assign(defaults().plan.platform, p.platform || {}), base: Object.assign(defaults().plan.base, p.base || {}), tasks: Array.isArray(p.tasks) ? p.tasks.filter(t => t && Array.isArray(t.chunks)) : [] };
+    out.plan = { platform: Object.assign(defaults().plan.platform, p.platform || {}), base: Object.assign(defaults().plan.base, p.base || {}), tasks: Array.isArray(p.tasks) ? p.tasks.filter(t => t && Array.isArray(t.chunks)) : [],
+      structures: Array.isArray(p.structures) ? p.structures.filter(s => s && s.def) : [] };
     if (!Array.isArray(out.plan.base.edits)) out.plan.base.edits = [];
+    out.structdefs = Array.isArray(w.structdefs) && w.structdefs.length ? w.structdefs : [{ id: 'lotus', name: 'Лотос Легиона', kind: 'lotus', scale: out.plan.base.scale || 1, edits: out.plan.base.edits || [], w: 10, d: 10, h: 86, color: '#e07b2a', note: 'Главное здание легиона: 6 центральных, 8 средних и 8 входных лепестков.' }];
     delete out.users;
     return out;
   }
@@ -75,7 +81,11 @@
 
     async init() {
       if (this.mode !== 'server') return;
-      try { const me = await this.api('GET', '/api/me'); this.user = me.user; if (me.meta) this.meta = me.meta; if (me.user) this.users[me.user.id] = me.user; }
+      try {
+        const me = await this.api('GET', '/api/me'); this.user = me.user; if (me.meta) this.meta = me.meta; if (me.user) this.users[me.user.id] = me.user;
+        if (me.user && me.prefs && typeof me.prefs === 'object' && Object.keys(me.prefs).length) { prefs = Object.assign(prefs, me.prefs); write('mcmap.prefs', prefs); if (prefs.theme) { applyTheme(prefs.theme); window.dispatchEvent(new Event('themechange')); } }
+        else if (me.user && Object.keys(prefs).length) this.api('PUT', '/api/prefs', prefs).catch(() => { });
+      }
       catch (e) { this.toast(e.message, 6000); }
     },
     async load() {
@@ -104,7 +114,8 @@
         this.world.savedAt = Date.now(); write(STORE_KEY, this.world); this.dirty = true; renderStatus(); this.emit(why); return;
       }
       this.emit(why);
-      if (['plan', 'tasks', 'base', 'platform'].includes(why)) {
+      if (why === 'structdefs') { setStatus('сохраняю…', true); this.api('PUT', '/api/structdefs', this.world.structdefs).then(() => setStatus('сохранено')).catch(e => { setStatus('не сохранено', true); this.toast(e.message, 6000); }); return; }
+      if (['plan', 'tasks', 'base', 'platform', 'structures'].includes(why)) {
         clearTimeout(this._planTimer); setStatus('сохраняю…', true);
         this._planTimer = setTimeout(() => this.api('PUT', '/api/plan', this.world.plan).then(() => setStatus('сохранено')).catch(e => { setStatus('не сохранено', true); this.toast(e.message, 6000); }), 700);
       } else if (why === 'map') this.api('PUT', '/api/maps', this.world.maps).then(() => setStatus('сохранено')).catch(e => this.toast(e.message, 6000));
@@ -207,7 +218,8 @@
   const ICON = {
     home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9.5h13V10"/><path d="M10 19.5v-5h4v5"/>',
     map: '<path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5M15 6.5V20"/>',
-    plan: '<path d="M12 3 20.5 7.5v9L12 21l-8.5-4.5v-9z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>',
+    plan: '<path d="M3 8.5 12 4l9 4.5-9 4.5z"/><path d="M3 12.5 12 17l9-4.5M3 16.5 12 21l9-4.5"/>',
+    structs: '<path d="M12 3 20.5 7.5v9L12 21l-8.5-4.5v-9z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>',
     tasks: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="m8 9 1.6 1.6L12.5 7.7M8 15l1.6 1.6 2.9-2.9M14.5 9.5H17M14.5 15.5H17"/>',
     forum: '<path d="M4 5h16v10.5H9.5L5.5 19v-3.5H4z"/><path d="M8 9h8M8 12h5"/>',
     users: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3.3 2.8-5 5.5-5s4.9 1.7 5.5 5"/><circle cx="16.8" cy="9.5" r="2.4"/><path d="M15.5 14.2c2.6.1 4.3 1.6 4.9 4.6"/>',
@@ -219,14 +231,14 @@
   const svg = (n, s) => `<svg viewBox="0 0 24 24" width="${s || 20}" height="${s || 20}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
   App.icon = svg;
   App.theme = () => document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-  App.setTheme = t => { document.documentElement.dataset.theme = t; write('mcmap.theme', t); try { localStorage.setItem('mcmap.theme', t); } catch (e) { } window.dispatchEvent(new Event('themechange')); };
+  App.setTheme = t => { applyTheme(t); App.setPref('theme', App.theme()); window.dispatchEvent(new Event('themechange')); };
   App.mountShell = function (active) {
     const main = document.createElement('div'); main.className = 'main';
     [...document.body.children].forEach(el => { if (el.tagName !== 'SCRIPT' && el.tagName !== 'DIALOG') main.appendChild(el); });
     const nav = document.createElement('aside'); nav.className = 'nav'; nav.setAttribute('aria-label', 'Меню и чат');
-    const links = [['home', 'index.html', 'Главная'], ['map', 'map.html', 'Карта мира'], ['plan', 'plan.html', 'План базы'], ['tasks', 'tasks.html', 'Задачи'], ['forum', 'forum.html', 'Форум']];
+    const links = [['home', 'index.html', 'Главная'], ['map', 'map.html', 'Карта мира'], ['plan', 'plan.html', 'План базы'], ['structs', 'structures.html', 'Структуры'], ['tasks', 'tasks.html', 'Задачи'], ['forum', 'forum.html', 'Форум']];
     if (App.mode === 'server' && App.can('seeUsers')) links.push(['users', 'users.html', 'Участники']);
-    const shown = App.mode === 'server' ? links : links.slice(0, 3);
+    const shown = App.mode === 'server' ? links : links.slice(0, 4);
     nav.innerHTML = `
       <div class="nav-top"><a class="brand" href="index.html" id="brandName"></a><button class="btn sm theme-btn" id="themeBtn"></button></div>
       <div class="nav-user" id="navUser"></div>
@@ -472,6 +484,20 @@
   }
   App.openSettings = openSettings;
   window.addEventListener('beforeunload', e => { if (App.mode === 'local' && App.dirty && App.gh.ready()) { e.preventDefault(); e.returnValue = ''; } });
+
+  App.pref = (k, d) => (Object.prototype.hasOwnProperty.call(prefs, k) ? prefs[k] : d);
+  let prefTimer = 0;
+  App.setPref = (k, v) => {
+    prefs[k] = v; write('mcmap.prefs', prefs);
+    if (App.mode === 'server' && App.user) { clearTimeout(prefTimer); prefTimer = setTimeout(() => App.api('PUT', '/api/prefs', prefs).catch(() => { }), 700); }
+  };
+  /* where a placed structure sits, in blocks: [x0, x1) × [z0, z1) */
+  App.footprint = (def, s) => {
+    if (!def) return null;
+    if (def.kind === 'lotus') { const N = App.BASE_N[String(def.scale)] || 73, ox = s.cx * 16 + 8, oz = s.cz * 16 + 8; return { x0: ox - N, x1: ox + N + 1, z0: oz - N, z1: oz + N + 1, ox, oz }; }
+    const odd = (s.rot || 0) % 2 === 1, W = odd ? def.d : def.w, D = odd ? def.w : def.d, x0 = s.cx * 16, z0 = s.cz * 16;
+    return { x0, x1: x0 + W * 16, z0, z1: z0 + D * 16, ox: x0 + W * 8, oz: z0 + D * 8 };
+  };
 
   /* shared constants */
   App.chunkOf = v => Math.floor(v / 16);

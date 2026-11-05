@@ -42,7 +42,7 @@
     <section class="hero">
       <div class="card hero-main">
         <h1>${esc((W.name || 'Мир').replace(/\s+\S+$/, ''))} <span>${esc((W.name || 'Мир').split(/\s+/).pop())}</span></h1>
-        <p>Штаб легиона в мире Ascension of Ages: карта мира с метками, 3D-план базы «Лотос Легиона», общие задачи, форум и чат. Общий чат — слева, на любой странице.</p>
+        <p>Штаб легиона в мире Ascension of Ages: карта мира с метками, 3D-план базы со структурами, общие задачи, форум и чат. Общий чат — слева, на любой странице.</p>
         <div class="row" style="margin-top:6px"><a class="btn primary" href="map.html">Открыть карту</a><a class="btn" href="plan.html">План базы</a>${srv ? '<a class="btn" href="tasks.html">Что делать</a>' : ''}</div>
       </div>
       ${join}
@@ -50,7 +50,7 @@
 
     <section class="tiles">
       ${tile('map.html', 'map', 'Карта мира', fmt(W.markers.length), 'меток', 'Деревни, порталы, ресурсы. Наведи — координаты, правый клик — метка.')}
-      ${tile('plan.html', 'plan', 'План базы', fmt(W.plan.tasks.length), 'зон', `${chunks} чанков размечено. База стоит в чанке ${App.sgn(W.plan.base.cx)}, ${App.sgn(W.plan.base.cz)}.`)}
+      ${tile('plan.html', 'plan', 'План базы', fmt(W.plan.tasks.length), 'зон', `${chunks} чанков размечено, структур на платформе: ${W.plan.structures.length}.`)}
       ${srv ? tile('tasks.html', 'tasks', 'Задачи', doing.length, 'в работе', `${todo.length} ждут исполнителя. Возьми любую в «Задачах».`) : ''}
       ${srv ? tile('forum.html', 'forum', 'Форум', threads.length, 'тем', 'Предложения, заявления на вступление, новости.') : ''}
     </section>

@@ -60,8 +60,10 @@
   });
   const grid = new Grid({ pane: 'grid', tileSize: 256, minZoom: -6, maxZoom: 5, updateWhenZooming: false });
   grid.addTo(map);
-  $('showGrid').onchange = e => e.target.checked ? grid.addTo(map) : grid.remove();
+  $('showGrid').checked = App.pref('map.grid', true); if (!$('showGrid').checked) grid.remove();
+  $('showGrid').onchange = e => { App.setPref('map.grid', e.target.checked); e.target.checked ? grid.addTo(map) : grid.remove(); };
   const mq = window.matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener && mq.addEventListener('change', () => grid.redraw());
+  window.addEventListener('themechange', () => { grid.redraw(); setTimeout(renderPlan, 0); });
 
   /* ---------- map image ---------- */
   const idb = {
@@ -260,13 +262,13 @@
       }
       if (segs.length) L.polyline(segs, { renderer: rend, pane: 'plan', color: t.color, weight: 2.5, dashArray: '6 5', interactive: false }).addTo(planLayer);
     }
-    if (P.base.placed) {
-      const N = App.BASE_N[String(P.base.scale)] || 73, cx = P.base.cx * 16 + 8, cz = P.base.cz * 16 + 8;
-      rect(cx - N, cz - N, cx + N + 1, cz + N + 1, { color: acc, weight: 2, fillColor: acc, fillOpacity: .12 }).bindTooltip(`<b>Лотос Легиона</b><br>центр X ${sgn(cx)}, Z ${sgn(cz)}`, { className: 'chunk-tip', sticky: true });
-      L.circleMarker(ll(cx + .5, cz + .5), { renderer: rend, pane: 'plan', radius: 4, color: acc, fillColor: acc, fillOpacity: 1, interactive: false }).addTo(planLayer);
+    for (const st of P.structures || []) {
+      const def = (W().structdefs || []).find(d => d.id === st.def), fp = App.footprint(def, st); if (!fp) continue;
+      rect(fp.x0, fp.z0, fp.x1, fp.z1, { color: def.color, weight: 2, fillColor: def.color, fillOpacity: .15 }).bindTooltip(`<b>${esc(def.name)}</b><br>центр X ${sgn(Math.floor(fp.ox))}, Z ${sgn(Math.floor(fp.oz))}`, { className: 'chunk-tip', sticky: true });
     }
   }
-  $('showPlan').onchange = renderPlan;
+  $('showPlan').checked = App.pref('map.plan', true);
+  $('showPlan').onchange = e => { App.setPref('map.plan', e.target.checked); renderPlan(); };
 
   /* ---------- interactions ---------- */
   const hud = $('hud');
@@ -327,11 +329,11 @@
       if (!$('formSec').hidden || calib) return;
       const w = await App.api('GET', '/api/world'); App.addUsers(w.users);
       const before = JSON.stringify([W().markers, W().plan, W().maps]);
-      W().markers = w.markers; W().plan = w.plan; const mapsChanged = JSON.stringify(W().maps[dim]) !== JSON.stringify(w.maps[dim]) && W().maps[dim].image !== 'local:'; W().maps = Object.assign(W().maps, w.maps);
+      W().markers = w.markers; W().plan = w.plan; if (w.structdefs) W().structdefs = w.structdefs; const mapsChanged = JSON.stringify(W().maps[dim]) !== JSON.stringify(w.maps[dim]) && W().maps[dim].image !== 'local:'; W().maps = Object.assign(W().maps, w.maps);
       if (before !== JSON.stringify([W().markers, W().plan, W().maps])) { renderMarkers(); renderPlan(); if (mapsChanged) loadImage(); }
     }, 45000);
   }
-  map.setView(ll(W().plan.base.cx * 16 + 8, W().plan.base.cz * 16 + 8), -1);
+  map.setView(ll(0, 0), -1);
   renderMarkers(); renderPlan(); renderSeed(); loadImage();
   const q = new URLSearchParams(location.search); if (q.has('x') && q.has('z')) { $('goto').value = q.get('x') + ' ' + q.get('z'); goto(); }
 })();
