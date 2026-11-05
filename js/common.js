@@ -201,26 +201,41 @@
   function toB64(s) { const b = new TextEncoder().encode(s); let bin = ''; for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(bin); }
   function fromB64(s) { const bin = atob(String(s).replace(/\s/g, '')); const b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i); return new TextDecoder().decode(b); }
 
-  /* ---------- top bar ---------- */
-  function setStatus(text, warn) { const st = $('saveStatus'); if (!st) return; st.classList.toggle('dirty', !!warn); st.innerHTML = `<i></i>${esc(text)}`; }
+  /* ---------- app shell: left menu + chat ---------- */
+  function setStatus(text, warn) { const st = $('saveStatus'); if (!st) return; st.hidden = false; st.classList.toggle('dirty', !!warn); st.innerHTML = `<i></i>${esc(text)}`; }
   function renderStatus() { if (App.mode === 'local') setStatus(App.dirty ? 'есть изменения не на GitHub' : 'всё сохранено', App.dirty); }
-  App.mountTop = function (active) {
-    const top = document.createElement('header'); top.className = 'top';
-    const tabs = [['map', 'index.html', 'Карта'], ['plan', 'plan.html', 'План'], ['tasks', 'tasks.html', 'Задачи'], ['forum', 'forum.html', 'Форум'], ['chat', 'chat.html', 'Горячий чат']];
-    if (App.mode === 'server' && App.can('seeUsers')) tabs.push(['users', 'users.html', 'Участники']);
-    const shown = App.mode === 'server' ? tabs : tabs.slice(0, 2);
-    top.innerHTML = `
-      <div class="brand" id="brandName"></div>
-      <nav class="tabs" aria-label="Разделы">${shown.map(([k, h, n]) => `<a href="${h}" ${active === k ? 'aria-current="page"' : ''}>${n}</a>`).join('')}</nav>
-      <div class="spacer"></div>
-      <div class="status" id="saveStatus" aria-live="polite"></div>
-      <div class="row" id="topRight"></div>`;
-    document.body.prepend(top);
-    const nm = () => { const n = (App.world && App.world.name) || App.meta.name || 'Мир'; const i = n.lastIndexOf(' '); $('brandName').innerHTML = i > 0 ? esc(n.slice(0, i)) + ' <span>' + esc(n.slice(i + 1)) + '</span>' : '<span>' + esc(n) + '</span>'; document.title = (shown.find(t => t[0] === active) || [, , ''])[2] + ' · ' + n; };
+  const ICON = {
+    home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9.5h13V10"/><path d="M10 19.5v-5h4v5"/>',
+    map: '<path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5M15 6.5V20"/>',
+    plan: '<path d="M12 3 20.5 7.5v9L12 21l-8.5-4.5v-9z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>',
+    tasks: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="m8 9 1.6 1.6L12.5 7.7M8 15l1.6 1.6 2.9-2.9M14.5 9.5H17M14.5 15.5H17"/>',
+    forum: '<path d="M4 5h16v10.5H9.5L5.5 19v-3.5H4z"/><path d="M8 9h8M8 12h5"/>',
+    users: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3.3 2.8-5 5.5-5s4.9 1.7 5.5 5"/><circle cx="16.8" cy="9.5" r="2.4"/><path d="M15.5 14.2c2.6.1 4.3 1.6 4.9 4.6"/>',
+    clip: '<path d="M20 11.5 12.2 19.3a5 5 0 0 1-7-7l8.1-8.2a3.4 3.4 0 0 1 4.8 4.8l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4"/>',
+    send: '<path d="M4 12 20 4l-4 16-4.5-6.5z"/><path d="M11.5 13.5 20 4"/>'
+  };
+  const svg = (n, s) => `<svg viewBox="0 0 24 24" width="${s || 20}" height="${s || 20}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
+  App.icon = svg;
+  App.mountShell = function (active) {
+    const main = document.createElement('div'); main.className = 'main';
+    [...document.body.children].forEach(el => { if (el.tagName !== 'SCRIPT' && el.tagName !== 'DIALOG') main.appendChild(el); });
+    const nav = document.createElement('aside'); nav.className = 'nav'; nav.setAttribute('aria-label', 'Меню и чат');
+    const links = [['home', 'index.html', 'Главная'], ['map', 'map.html', 'Карта мира'], ['plan', 'plan.html', 'План базы'], ['tasks', 'tasks.html', 'Задачи'], ['forum', 'forum.html', 'Форум']];
+    if (App.mode === 'server' && App.can('seeUsers')) links.push(['users', 'users.html', 'Участники']);
+    const shown = App.mode === 'server' ? links : links.slice(0, 3);
+    nav.innerHTML = `
+      <a class="brand" href="index.html" id="brandName"></a>
+      <div class="nav-user" id="navUser"></div>
+      <nav class="nav-links">${shown.map(([k, h, n]) => `<a href="${h}" ${active === k ? 'aria-current="page"' : ''}>${svg(k)}<span>${n}</span></a>`).join('')}</nav>
+      <div class="status" id="saveStatus" hidden aria-live="polite"></div>
+      <section class="nav-chat" id="navChat" aria-label="Чат"></section>`;
+    document.body.prepend(nav); nav.after(main);
+    document.body.classList.add('shell');
+    const nm = () => { const n = (App.world && App.world.name) || App.meta.name || 'Мир'; const i = n.lastIndexOf(' '); $('brandName').innerHTML = i > 0 ? esc(n.slice(0, i)) + ' <span>' + esc(n.slice(i + 1)) + '</span>' : '<span>' + esc(n) + '</span>'; document.title = ((links.find(t => t[0] === active) || [, , ''])[2] || 'Главная') + ' · ' + n; };
     nm(); App.onChange(nm);
-    const right = $('topRight');
+    const box = $('navUser');
     if (App.mode === 'local') {
-      right.innerHTML = `<button class="btn primary" id="ghPush">Сохранить на GitHub</button><button class="btn" id="openSettings">Настройки</button>`;
+      box.innerHTML = `<div class="row"><button class="btn primary grow" id="ghPush">Сохранить на GitHub</button><button class="btn" id="openSettings">Настройки</button></div>`;
       renderStatus();
       $('ghPush').onclick = async () => {
         if (!App.gh.ready()) { App.toast('Сначала настрой синхронизацию с GitHub'); openSettings('gh'); return; }
@@ -230,16 +245,145 @@
       };
     } else if (App.user) {
       const u = App.user;
-      right.innerHTML = `<span class="me">${App.avatar(u, 26)}<span class="me-n">${esc(u.name)}</span>${u.banned ? '<span class="role role-banned">Заблокирован</span>' : App.roleBadge(u.role) || '<span class="role">Гость</span>'}</span>
-        ${App.can('owner') ? '<button class="btn" id="openSettings">Настройки</button>' : ''}<button class="btn" id="logoutBtn">Выйти</button>`;
+      box.innerHTML = `<div class="me">${App.avatar(u, 36)}<div class="me-t"><b>${esc(u.name)}</b>${u.banned ? '<span class="role role-banned">Заблокирован</span>' : App.roleBadge(u.role) || '<span class="role">Гость</span>'}</div></div>
+        <div class="row">${App.can('owner') ? '<button class="btn sm" id="openSettings">Настройки</button>' : ''}<button class="btn sm" id="logoutBtn">Выйти</button></div>`;
       $('logoutBtn').onclick = async () => { try { await App.api('POST', '/api/logout'); } catch (e) { } write(TOKEN_KEY, ''); location.reload(); };
     } else {
-      right.innerHTML = `<button class="btn primary" id="loginBtn">Войти через Telegram</button>`;
+      box.innerHTML = `<button class="btn primary tg" id="loginBtn">Войти через Telegram</button><p class="note">Смотреть можно без входа. Писать — после входа.</p>`;
       $('loginBtn').onclick = openLogin;
     }
     if ($('openSettings')) { $('openSettings').onclick = () => openSettings(); buildSettings(); }
-    buildLogin();
+    buildLogin(); buildLightbox();
+    mountChat($('navChat'));
   };
+  App.mountTop = App.mountShell;
+  /* tabs in a side panel: buttons [data-tab] switch sibling [data-pane] blocks */
+  App.tabs = function (root, onSwitch) {
+    const btns = [...root.querySelectorAll('[data-tab]')], panes = [...root.querySelectorAll('[data-pane]')];
+    const show = name => { btns.forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name))); panes.forEach(p => p.hidden = p.dataset.pane !== name); onSwitch && onSwitch(name); };
+    btns.forEach(b => b.onclick = () => show(b.dataset.tab));
+    return show;
+  };
+
+  /* ---------- images ---------- */
+  App.imgUrl = id => CONFIG.api.replace(/\/+$/, '') + '/api/img/' + id;
+  App.uploadImage = async function (file) {
+    if (!file || !/^image\//.test(file.type)) throw new Error('Это не картинка');
+    let blob = file;
+    if (!(file.type === 'image/gif' && file.size <= 1.4e6)) {
+      const img = await new Promise((res, rej) => { const u = URL.createObjectURL(file), im = new Image(); im.onload = () => { URL.revokeObjectURL(u); res(im); }; im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('Не удалось открыть картинку')); }; im.src = u; });
+      for (const [side, q] of [[1920, .86], [1600, .8], [1280, .72], [1000, .65]]) {
+        const k = Math.min(1, side / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        let b = await new Promise(r => c.toBlob(r, 'image/webp', q)); if (!b || b.type !== 'image/webp') b = await new Promise(r => c.toBlob(r, 'image/jpeg', q));
+        blob = b; if (b && b.size <= 1.45e6) break;
+      }
+    }
+    if (!blob || blob.size > 1.6e6) throw new Error('Картинка слишком большая');
+    const tk = read(TOKEN_KEY, '');
+    const r = await fetch(CONFIG.api.replace(/\/+$/, '') + '/api/images', { method: 'POST', headers: { Authorization: 'Bearer ' + tk, 'Content-Type': blob.type }, body: blob });
+    let j = {}; try { j = await r.json(); } catch (e) { }
+    if (!r.ok) throw new Error(j.error || 'Не удалось загрузить картинку');
+    return j.id;
+  };
+  /* attachment picker: button + paste + drop, up to 4 pictures; returns {ids(), clear(), count()} */
+  App.attach = function (holder, textarea, opts) {
+    opts = opts || {}; const max = opts.max || 4, items = [];
+    holder.classList.add('attach');
+    holder.innerHTML = `<input type="file" accept="image/*" multiple hidden><div class="thumbs"></div>`;
+    const input = holder.querySelector('input'), thumbs = holder.querySelector('.thumbs');
+    const render = () => { thumbs.innerHTML = items.map((it, i) => `<span class="thumb"><img src="${it.url}" alt=""><button type="button" data-rm="${i}" aria-label="Убрать картинку">×</button></span>`).join(''); holder.classList.toggle('has', items.length > 0); if (opts.onChange) opts.onChange(items.length); };
+    const add = files => { for (const f of files) { if (!/^image\//.test(f.type)) continue; if (items.length >= max) { App.toast(`Не больше ${max} картинок`); break; } items.push({ file: f, url: URL.createObjectURL(f) }); } render(); };
+    input.onchange = () => { add(input.files); input.value = ''; };
+    thumbs.onclick = e => { const b = e.target.closest('[data-rm]'); if (b) { const [it] = items.splice(+b.dataset.rm, 1); URL.revokeObjectURL(it.url); render(); } };
+    if (textarea) {
+      textarea.addEventListener('paste', e => { const fs = [...(e.clipboardData && e.clipboardData.files || [])].filter(f => /^image\//.test(f.type)); if (fs.length) { e.preventDefault(); add(fs); } });
+      const zone = opts.zone || textarea;
+      zone.addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); zone.classList.add('drop'); } });
+      zone.addEventListener('dragleave', () => zone.classList.remove('drop'));
+      zone.addEventListener('drop', e => { zone.classList.remove('drop'); if (e.dataTransfer.files.length) { e.preventDefault(); add(e.dataTransfer.files); } });
+    }
+    return {
+      pick() { input.click(); }, count: () => items.length,
+      async ids() { const out = []; for (const it of items) { if (!it.id) it.id = await App.uploadImage(it.file); out.push(it.id); } return out; },
+      clear() { items.splice(0).forEach(it => URL.revokeObjectURL(it.url)); render(); }
+    };
+  };
+  App.gallery = (ids, cls) => ids && ids.length ? `<div class="gallery ${cls || ''}">${ids.map(i => `<a href="${App.imgUrl(i)}" data-lightbox><img src="${App.imgUrl(i)}" alt="Картинка" loading="lazy"></a>`).join('')}</div>` : '';
+  function buildLightbox() {
+    if ($('lightbox')) return;
+    const d = document.createElement('dialog'); d.id = 'lightbox'; d.className = 'lightbox';
+    d.innerHTML = '<button class="btn sm" data-close>Закрыть</button><img alt="">'; document.body.appendChild(d);
+    d.onclick = e => { if (e.target === d || e.target.closest('[data-close]')) d.close(); };
+    document.addEventListener('click', e => { const a = e.target.closest('a[data-lightbox]'); if (!a) return; e.preventDefault(); d.querySelector('img').src = a.href; d.showModal(); });
+  }
+
+  /* ---------- chat in the menu column ---------- */
+  function mountChat(el) {
+    if (App.mode !== 'server') { el.innerHTML = '<p class="note pad-s">Чат заработает, когда подключён сервер.</p>'; return; }
+    const CH = [['talk', 'Общий', 'Разговоры легиона'], ['hot', 'Стройка', 'Что сейчас делается на базе']];
+    let ch = read('mcmap.chatChannel', 'talk'); if (!CH.some(c => c[0] === ch)) ch = 'talk';
+    const seen = read('mcmap.chatSeen', { talk: 0, hot: 0 });
+    let msgs = [], lastId = 0, loaded = false;
+    const mod = App.can('moderate'), me = App.user ? App.user.id : null;
+    el.innerHTML = `<div class="chat-tabs" role="tablist">${CH.map(([k, n]) => `<button role="tab" data-ch="${k}">${n}<i class="dot" hidden></i></button>`).join('')}</div>
+      <p class="chat-sub" id="chatSub"></p>
+      <div class="chat-feed" id="chatFeed" aria-live="polite"><p class="note pad-s">Загружаю…</p></div>
+      <div class="chat-input" id="chatInput"></div>`;
+    const feed = $('chatFeed'), input = $('chatInput');
+    if (App.can('chat')) {
+      input.innerHTML = `<div class="attach-h"></div><div class="row nowrap"><textarea id="chatMsg" rows="1" maxlength="1000" placeholder="Сообщение…" aria-label="Сообщение"></textarea>
+        <button class="btn icon" id="chatClip" title="Прикрепить картинку" aria-label="Прикрепить картинку">${svg('clip', 18)}</button><button class="btn primary icon" id="chatSend" title="Отправить" aria-label="Отправить">${svg('send', 18)}</button></div>`;
+      const ta = $('chatMsg'), att = App.attach(input.querySelector('.attach-h'), ta, { zone: el });
+      const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(140, ta.scrollHeight) + 'px'; };
+      ta.addEventListener('input', grow);
+      $('chatClip').onclick = () => att.pick();
+      const send = async () => {
+        const t = ta.value.trim(); if (!t && !att.count()) return; $('chatSend').disabled = true;
+        try { const images = await att.ids(); await App.api('POST', '/api/chat', { body: t, channel: ch, images }); ta.value = ''; grow(); att.clear(); await poll(); feed.scrollTop = feed.scrollHeight; }
+        catch (e) { App.toast(e.message, 4000); } finally { $('chatSend').disabled = false; ta.focus(); }
+      };
+      $('chatSend').onclick = send;
+      ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+    } else if (!App.user) input.innerHTML = '<p class="note">Писать в чат могут участники легиона. <a href="#" id="chatLogin">Войти</a></p>';
+    else input.innerHTML = `<p class="note">${App.user.banned ? 'Аккаунт заблокирован.' : 'Писать в чат могут участники. <a href="forum.html#new-apply">Подать заявление</a>'}</p>`;
+    if ($('chatLogin')) $('chatLogin').onclick = e => { e.preventDefault(); openLogin(); };
+    el.querySelector('.chat-tabs').onclick = e => { const b = e.target.closest('[data-ch]'); if (!b) return; ch = b.dataset.ch; write('mcmap.chatChannel', ch); render(true); };
+    const day = t => new Date(t).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+    function render(jump) {
+      el.querySelectorAll('[data-ch]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.ch === ch)));
+      $('chatSub').textContent = CH.find(c => c[0] === ch)[2];
+      const list = msgs.filter(m => (m.channel || 'hot') === ch);
+      const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+      if (!list.length) feed.innerHTML = `<p class="note pad-s">${loaded ? 'Сообщений пока нет.' : 'Загружаю…'}</p>`;
+      else {
+        let out = '', prev = null;
+        for (const m of list) {
+          if (!prev || day(prev.created) !== day(m.created)) out += `<div class="day">${day(m.created)}</div>`;
+          const cont = prev && prev.author === m.author && m.created - prev.created < 5 * 60000 && day(prev.created) === day(m.created);
+          const u = App.users[m.author];
+          out += `<div class="cmsg${cont ? ' cont' : ''}">${cont ? '' : `<div class="cmh">${App.avatar(u, 22)}<b>${esc(App.userName(m.author))}</b><time title="${App.when(m.created)}">${new Date(m.created).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</time></div>`}
+            ${m.body ? `<div class="cmb">${App.text(m.body)}</div>` : ''}${App.gallery(m.images, 'sm')}
+            ${(mod || me === m.author) ? `<button class="cdel" data-del="${m.id}" title="Удалить" aria-label="Удалить сообщение">×</button>` : ''}</div>`;
+          prev = m;
+        }
+        feed.innerHTML = out;
+      }
+      if (jump || atBottom) feed.scrollTop = feed.scrollHeight;
+      if (list.length) { seen[ch] = list[list.length - 1].id; write('mcmap.chatSeen', seen); }
+      for (const [k] of CH) { const other = msgs.filter(m => (m.channel || 'hot') === k && m.id > (seen[k] || 0) && m.author !== me).length; el.querySelector(`[data-ch="${k}"] .dot`).hidden = !(k !== ch && other); }
+    }
+    feed.addEventListener('click', async e => {
+      const d = e.target.closest('[data-del]'); if (!d) return;
+      if (d.dataset.arm !== '1') { d.dataset.arm = '1'; d.textContent = 'удалить?'; setTimeout(() => { if (d.isConnected) { d.dataset.arm = ''; d.textContent = '×'; } }, 3000); return; }
+      try { await App.api('DELETE', '/api/chat/' + d.dataset.del); msgs = msgs.filter(m => m.id !== +d.dataset.del); render(); } catch (er) { App.toast(er.message, 4000); }
+    });
+    async function full() { const r = await App.api('GET', '/api/chat'); App.addUsers(r.users); msgs = r.messages; lastId = msgs.length ? msgs[msgs.length - 1].id : 0; loaded = true; render(!full.done); full.done = true; }
+    async function poll() { const r = await App.api('GET', '/api/chat?after=' + lastId); App.addUsers(r.users); if (r.messages.length) { msgs = msgs.concat(r.messages).slice(-600); lastId = msgs[msgs.length - 1].id; render(); } }
+    full().catch(e => { feed.innerHTML = `<p class="note pad-s">${esc(e.message)}</p>`; });
+    App.every(poll, 5000); App.every(full, 120000);
+  }
 
   /* ---------- login ---------- */
   function buildLogin() {

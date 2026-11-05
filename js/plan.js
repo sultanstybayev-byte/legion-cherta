@@ -5,6 +5,7 @@
   await App.load();
   App.mountTop('plan');
   const CAN = App.can('plan');
+  const showTab = App.tabs(document.querySelector('.side'), () => setTimeout(resize, 0));
   const deny = () => { App.toast(App.user ? 'План меняют модераторы. Ты можешь смотреть.' : 'Войди через Telegram. План меняют модераторы.', 4000); return true; };
   const W = () => App.world, P = () => App.world.plan;
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -269,7 +270,7 @@
     if (cx < pl.cx0 || cz < pl.cz0 || cx >= pl.cx0 + pl.size || cz >= pl.cz0 + pl.size) { if (!add) { sel.clear(); colorGround(); renderSel(); } return; }
     const k = key(cx, cz);
     if (add) { sel.has(k) ? sel.delete(k) : sel.add(k); } else { const only = sel.size === 1 && sel.has(k); sel.clear(); if (!only) sel.add(k); }
-    colorGround(); renderSel();
+    colorGround(); renderSel(); showTab('tasks');
   }
 
   /* ---------- selection & tasks UI ---------- */
@@ -283,7 +284,7 @@
   function renderSel() {
     const cs = selChunks();
     $('selCount').textContent = cs.length ? `${cs.length}` : '';
-    $('selEdit').hidden = !cs.length || !CAN;
+    $('selEdit').hidden = !cs.length || !CAN; $('selEdit').style.display = $('selEdit').hidden ? 'none' : 'flex';
     if (!cs.length) { $('selInfo').textContent = 'Кликни по чанку. Shift+клик — добавить ещё, «Выделить рамкой» — сразу прямоугольник, двойной клик — вся задача.'; return; }
     const xs = cs.map(c => c[0]), zs = cs.map(c => c[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
     $('selInfo').innerHTML = cs.length === 1

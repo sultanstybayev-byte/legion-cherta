@@ -19,8 +19,14 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS posts_thread ON posts(thread, id)`,
   `CREATE TABLE IF NOT EXISTS chat (id INTEGER PRIMARY KEY AUTOINCREMENT, author INTEGER NOT NULL, body TEXT NOT NULL, created INTEGER)`,
   `CREATE TABLE IF NOT EXISTS lists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color TEXT, pos INTEGER NOT NULL DEFAULT 0, created INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, author INTEGER NOT NULL, mime TEXT NOT NULL, data BLOB NOT NULL, size INTEGER, created INTEGER)`,
   `CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, list INTEGER NOT NULL, title TEXT NOT NULL, note TEXT, status TEXT NOT NULL DEFAULT 'todo', assignee INTEGER, pos INTEGER NOT NULL DEFAULT 0, author INTEGER, created INTEGER, updated INTEGER)`
 ];
+// columns added after the first release; ALTER fails harmlessly when the column already exists
+const MIGRATIONS = [`ALTER TABLE posts ADD COLUMN images TEXT`, `ALTER TABLE chat ADD COLUMN images TEXT`, `ALTER TABLE chat ADD COLUMN channel TEXT NOT NULL DEFAULT 'hot'`];
+const CHANNELS = ['talk', 'hot'];
+const IMG_TYPES = { 'image/jpeg': [0xff, 0xd8, 0xff], 'image/png': [0x89, 0x50, 0x4e, 0x47], 'image/webp': [0x52, 0x49, 0x46, 0x46], 'image/gif': [0x47, 0x49, 0x46] };
+const IMG_MAX = 1600000;
 let schemaReady = false;
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
@@ -39,8 +45,13 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     try {
       if (!env.DB) fail(500, 'Сервер не настроен: не привязана база данных D1 с именем DB.');
-      if (!schemaReady) { await env.DB.batch(SCHEMA.map(s => env.DB.prepare(s))); schemaReady = true; }
+      if (!schemaReady) {
+        await env.DB.batch(SCHEMA.map(s => env.DB.prepare(s)));
+        for (const m of MIGRATIONS) { try { await env.DB.prepare(m).run(); } catch (e) { /* already there */ } }
+        schemaReady = true;
+      }
       const out = await route(req, env);
+      if (out instanceof Response) { const h = new Headers(out.headers); for (const [k, v] of Object.entries(cors)) h.set(k, v); return new Response(out.body, { status: out.status, headers: h }); }
       return new Response(JSON.stringify(out ?? { ok: true }), { status: 200, headers: { ...cors, 'Content-Type': 'application/json; charset=utf-8' } });
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;
@@ -240,6 +251,27 @@ async function route(req, env) {
     return { ok: true, markers: n };
   }
 
+  /* images */
+  if (r[0] === 'images' && !id && M === 'POST') {
+    need.login(me);
+    const mime = (req.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+    if (!IMG_TYPES[mime]) fail(415, 'Можно загрузить JPEG, PNG, WebP или GIF');
+    const buf = new Uint8Array(await req.arrayBuffer());
+    if (!buf.length) fail(400, 'Пустой файл'); if (buf.length > IMG_MAX) fail(413, 'Картинка больше 1,5 МБ');
+    if (!IMG_TYPES[mime].every((b, i) => buf[i] === b)) fail(415, 'Файл не похож на картинку');
+    const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM images WHERE author = ? AND created > ?').bind(me.id, now() - 3600000).first();
+    if (n.n >= 40) fail(429, 'Слишком много картинок за час');
+    const iid = hex(crypto.getRandomValues(new Uint8Array(12)));
+    await env.DB.prepare('INSERT INTO images (id, author, mime, data, size, created) VALUES (?, ?, ?, ?, ?, ?)').bind(iid, me.id, mime, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), buf.length, now()).run();
+    return { id: iid };
+  }
+  if (r[0] === 'img' && id && M === 'GET') {
+    const row = /^[0-9a-f]{24}$/.test(id) ? await env.DB.prepare('SELECT mime, data FROM images WHERE id = ?').bind(id).first() : null;
+    if (!row) return new Response('not found', { status: 404 });
+    const data = row.data instanceof ArrayBuffer ? new Uint8Array(row.data) : Array.isArray(row.data) ? new Uint8Array(row.data) : row.data;
+    return new Response(data, { status: 200, headers: { 'Content-Type': row.mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' } });
+  }
+
   /* forum */
   if (r[0] === 'forum' && !id && M === 'GET') {
     const cat = url.searchParams.get('cat');
@@ -250,26 +282,27 @@ async function route(req, env) {
     need.login(me); const b = await body(req, 20000);
     const cat = FORUM_CATS.includes(b.cat) ? b.cat : 'talk';
     if (cat === 'news' && level(me, env) < ROLE_LEVEL.moderator) fail(403, 'Новости пишут только модераторы');
-    const title = str(b.title, 120, 'Заголовок'), text = str(b.body, 8000, 'Текст');
-    if (!title || !text) fail(400, 'Нужны заголовок и текст');
+    const title = str(b.title, 120, 'Заголовок'), text = str(b.body, 8000, 'Текст'), imgs = await ownImages(env, me, b.images);
+    if (!title || (!text && !imgs.length)) fail(400, 'Нужны заголовок и текст');
     await flood(env, 'threads', me, 60000, 'Новую тему можно создать раз в минуту');
     const t = now();
     const res = await env.DB.prepare('INSERT INTO threads (cat, title, author, created, updated, posts) VALUES (?, ?, ?, ?, ?, 1)').bind(cat, title, me.id, t, t).run();
     const tid = res.meta.last_row_id;
-    await env.DB.prepare('INSERT INTO posts (thread, author, body, created) VALUES (?, ?, ?, ?)').bind(tid, me.id, text, t).run();
+    await env.DB.prepare('INSERT INTO posts (thread, author, body, created, images) VALUES (?, ?, ?, ?, ?)').bind(tid, me.id, text, t, JSON.stringify(imgs)).run();
     return { id: tid };
   }
   if (r[0] === 'forum' && id && M === 'GET') {
     const t = await env.DB.prepare('SELECT * FROM threads WHERE id = ?').bind(id).first(); if (!t) fail(404, 'Тема не найдена');
-    const p = (await env.DB.prepare('SELECT * FROM posts WHERE thread = ? ORDER BY id').bind(id).all()).results;
+    const p = (await env.DB.prepare('SELECT * FROM posts WHERE thread = ? ORDER BY id').bind(id).all()).results.map(withImages);
     return { thread: t, posts: p, users: await usersById(env, [t.author, ...p.map(x => x.author)]) };
   }
   if (r[0] === 'forum' && id && M === 'POST') {
     need.login(me); const t = await env.DB.prepare('SELECT * FROM threads WHERE id = ?').bind(id).first(); if (!t) fail(404, 'Тема не найдена');
     if (t.closed && level(me, env) < ROLE_LEVEL.moderator) fail(403, 'Тема закрыта');
-    const text = str((await body(req, 20000)).body, 8000, 'Текст'); if (!text) fail(400, 'Пустой ответ');
+    const rb = await body(req, 20000), text = str(rb.body, 8000, 'Текст'), imgs = await ownImages(env, me, rb.images);
+    if (!text && !imgs.length) fail(400, 'Пустой ответ');
     await flood(env, 'posts', me, 8000, 'Не так быстро: подождите несколько секунд');
-    await env.DB.batch([env.DB.prepare('INSERT INTO posts (thread, author, body, created) VALUES (?, ?, ?, ?)').bind(id, me.id, text, now()),
+    await env.DB.batch([env.DB.prepare('INSERT INTO posts (thread, author, body, created, images) VALUES (?, ?, ?, ?, ?)').bind(id, me.id, text, now(), JSON.stringify(imgs)),
       env.DB.prepare('UPDATE threads SET posts = posts + 1, updated = ? WHERE id = ?').bind(now(), id)]);
     return { ok: true };
   }
@@ -282,6 +315,8 @@ async function route(req, env) {
   if (r[0] === 'forum' && id && M === 'DELETE') {
     need.login(me); const t = await env.DB.prepare('SELECT * FROM threads WHERE id = ?').bind(id).first(); if (!t) return { ok: true };
     if (level(me, env) < ROLE_LEVEL.moderator && !(t.author === me.id && t.posts <= 1)) fail(403, 'Удалить тему может модератор, а автор — пока в ней нет ответов');
+    const ps = (await env.DB.prepare('SELECT images FROM posts WHERE thread = ?').bind(id).all()).results;
+    await dropImages(env, ps.flatMap(x => parseImgs(x.images)));
     await env.DB.batch([env.DB.prepare('DELETE FROM posts WHERE thread = ?').bind(id), env.DB.prepare('DELETE FROM threads WHERE id = ?').bind(id)]);
     return { ok: true };
   }
@@ -292,6 +327,7 @@ async function route(req, env) {
     if (M === 'PATCH') { const text = str((await body(req, 20000)).body, 8000, 'Текст'); if (!text) fail(400, 'Пустой текст'); await env.DB.prepare('UPDATE posts SET body = ?, edited = ? WHERE id = ?').bind(text, now(), id).run(); return { ok: true }; }
     const first = await env.DB.prepare('SELECT MIN(id) AS f FROM posts WHERE thread = ?').bind(p.thread).first();
     if (first.f === p.id) fail(400, 'Первое сообщение удаляется вместе с темой');
+    await dropImages(env, parseImgs(p.images));
     await env.DB.batch([env.DB.prepare('DELETE FROM posts WHERE id = ?').bind(id), env.DB.prepare('UPDATE threads SET posts = posts - 1 WHERE id = ?').bind(p.thread)]);
     return { ok: true };
   }
@@ -299,21 +335,24 @@ async function route(req, env) {
   /* hot chat */
   if (r[0] === 'chat' && !id && M === 'GET') {
     const after = Number(url.searchParams.get('after') || 0);
-    const rows = after > 0
-      ? (await env.DB.prepare('SELECT * FROM chat WHERE id > ? ORDER BY id LIMIT 200').bind(after).all()).results
-      : (await env.DB.prepare('SELECT * FROM (SELECT * FROM chat ORDER BY id DESC LIMIT 150) ORDER BY id').all()).results;
+    const rows = (after > 0
+      ? (await env.DB.prepare('SELECT * FROM chat WHERE id > ? ORDER BY id LIMIT 300').bind(after).all()).results
+      : (await env.DB.prepare('SELECT * FROM (SELECT * FROM chat ORDER BY id DESC LIMIT 300) ORDER BY id').all()).results).map(withImages);
     return { messages: rows, users: await usersById(env, rows.map(x => x.author)) };
   }
   if (r[0] === 'chat' && !id && M === 'POST') {
     need.level(me, env, 'member', 'Писать в горячий чат могут участники. Подайте заявление на форуме.');
-    const text = str((await body(req, 4000)).body, 1000, 'Сообщение'); if (!text) fail(400, 'Пустое сообщение');
+    const cb = await body(req, 4000), text = str(cb.body, 1000, 'Сообщение'), imgs = await ownImages(env, me, cb.images);
+    const channel = CHANNELS.includes(cb.channel) ? cb.channel : 'hot';
+    if (!text && !imgs.length) fail(400, 'Пустое сообщение');
     await flood(env, 'chat', me, 1500, 'Не так быстро');
-    const res = await env.DB.prepare('INSERT INTO chat (author, body, created) VALUES (?, ?, ?)').bind(me.id, text, now()).run();
+    const res = await env.DB.prepare('INSERT INTO chat (author, body, created, images, channel) VALUES (?, ?, ?, ?, ?)').bind(me.id, text, now(), JSON.stringify(imgs), channel).run();
     return { id: res.meta.last_row_id };
   }
   if (r[0] === 'chat' && id && M === 'DELETE') {
     need.login(me); const m = await env.DB.prepare('SELECT * FROM chat WHERE id = ?').bind(id).first(); if (!m) return { ok: true };
     if (m.author !== me.id && level(me, env) < ROLE_LEVEL.moderator) fail(403, 'Можно удалять только свои сообщения');
+    await dropImages(env, parseImgs(m.images));
     await env.DB.prepare('DELETE FROM chat WHERE id = ?').bind(id).run(); return { ok: true };
   }
 
@@ -376,5 +415,20 @@ async function route(req, env) {
 
   fail(404, 'Нет такого адреса');
 }
+
+function parseImgs(v) { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a.filter(x => /^[0-9a-f]{24}$/.test(x)) : []; } catch (e) { return []; } }
+function withImages(row) { return Object.assign(row, { images: parseImgs(row.images) }); }
+async function ownImages(env, me, list) {
+  if (!Array.isArray(list) || !list.length) return [];
+  const ids = [...new Set(list.map(String))].slice(0, 4);
+  for (const i of ids) {
+    if (!/^[0-9a-f]{24}$/.test(i)) fail(400, 'Неверная картинка');
+    const row = await env.DB.prepare('SELECT author FROM images WHERE id = ?').bind(i).first();
+    if (!row) fail(400, 'Картинка не найдена, загрузите её заново');
+    if (row.author !== me.id) fail(403, 'Можно прикреплять только свои картинки');
+  }
+  return ids;
+}
+async function dropImages(env, ids) { for (const i of ids) await env.DB.prepare('DELETE FROM images WHERE id = ?').bind(i).run(); }
 
 export { verifyTelegram };

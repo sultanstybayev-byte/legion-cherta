@@ -19,63 +19,83 @@
       <button class="btn" id="toBase">К базе</button>
       <button class="btn" id="fullBtn">Во весь экран</button>
     </div>
-    <div class="hud" id="hud"><b>W</b><b>A</b><b>S</b><b>D</b> лететь · <b>Space</b>/<b>C</b> вверх/вниз · <b>Shift</b> быстрее · тяни мышью — смотреть · колесо — вперёд/назад · клик — выбрать чанк · <b>Shift</b>+клик — добавить · двойной клик — вся задача<br><span id="camPos"></span></div>
+    <div class="hud" id="hud"><b>W</b><b>A</b><b>S</b><b>D</b> лететь · <b>Space</b>/<b>C</b> вверх/вниз · <b>Shift</b> быстрее · мышь — смотреть · колесо — вперёд/назад<br>клик — чанк · <b>Shift</b>+клик — добавить · двойной клик — вся задача · <span id="camPos"></span></div>
     <div class="banner" id="busy" hidden><h3>Считаю модель базы…</h3><p class="note">Около 85 тысяч блоков, это пара секунд.</p></div>
   </main>
 
-  <aside class="side right" aria-label="Платформа, база и задачи">
-    <section class="sec">
-      <h2>Выбранные чанки <small id="selCount"></small></h2>
-      <p class="note" id="selInfo">Кликни по чанку на платформе. Shift+клик добавляет ещё чанки.</p>
-      <div id="selEdit" hidden>
-        <div class="row"><label class="f grow">Задача<select id="taskPick"></select></label></div>
-        <label class="f" id="newNameWrap">Название новой задачи<input type="text" id="taskName" maxlength="60" placeholder="например, Фермы и еда"></label>
-        <div class="row" id="newColorWrap"><div class="swatches" id="swatches"></div><input type="color" id="taskColor" value="#e07b2a" aria-label="Свой цвет"></div>
-        <label class="f">Заметка<textarea id="taskNote" maxlength="600" placeholder="что здесь будет"></textarea></label>
-        <div class="row">
-          <button class="btn primary" id="assignBtn">Назначить</button>
-          <button class="btn" id="unassignBtn">Освободить чанки</button>
-          <button class="btn" id="clearSel">Снять выбор</button>
+  <aside class="side" aria-label="Задачи, база и платформа">
+    <div class="ptabs" role="tablist">
+      <button role="tab" data-tab="tasks" aria-selected="true">Задачи <span class="note" id="taskCount"></span></button>
+      <button role="tab" data-tab="base" aria-selected="false">База</button>
+      <button role="tab" data-tab="platform" aria-selected="false">Платформа</button>
+    </div>
+
+    <div data-pane="tasks">
+      <section class="sec">
+        <h2>Выбранные чанки <small id="selCount"></small></h2>
+        <p class="note" id="selInfo"></p>
+        <div id="selEdit" hidden style="display:flex;flex-direction:column;gap:12px">
+          <label class="f">Задача<select id="taskPick"></select></label>
+          <label class="f" id="newNameWrap">Название новой задачи<input type="text" id="taskName" maxlength="60" placeholder="например, Фермы и еда"></label>
+          <div class="row" id="newColorWrap"><div class="swatches" id="swatches"></div><input type="color" id="taskColor" value="#e07b2a" aria-label="Свой цвет"></div>
+          <label class="f">Заметка<textarea id="taskNote" maxlength="600" placeholder="что здесь будет"></textarea></label>
+          <div class="row">
+            <button class="btn primary" id="assignBtn">Назначить</button>
+            <button class="btn" id="unassignBtn">Освободить</button>
+            <button class="btn" id="clearSel">Снять выбор</button>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+      <section class="sec">
+        <div class="row"><h2 class="grow">Все задачи</h2><label class="chip"><input type="checkbox" id="volume"><span class="dot" style="background:var(--accent)"></span>Объёмные зоны</label></div>
+        <ol class="steps-mini">
+          <li><b>Выбери чанки</b>: клик, Shift+клик или «Выделить рамкой».</li>
+          <li><b>Назови задачу</b> и выбери цвет — она обведётся пунктиром.</li>
+          <li><b>Чтобы расширить</b>, выбери её чанки вместе со свободными. Чтобы <b>объединить</b>, выбери чанки двух задач.</li>
+        </ol>
+      </section>
+      <div class="list" id="taskList"></div>
+    </div>
 
-    <section class="sec">
-      <h2>Задачи <small id="taskCount"></small></h2>
-      <label class="chip" style="align-self:flex-start"><input type="checkbox" id="volume"><span class="dot" style="background:var(--accent)"></span>Объёмные зоны</label>
-    </section>
-    <div class="list" id="taskList"></div>
+    <div data-pane="base" hidden>
+      <section class="sec">
+        <h2>База «Лотос Легиона»</h2>
+        <div class="row">
+          <label class="chip"><input type="checkbox" id="basePlaced"><span class="dot" style="background:var(--accent)"></span>На платформе</label>
+          <label class="chip"><input type="checkbox" id="baseHidden"><span class="dot" style="background:var(--muted)"></span>Скрыть в 3D</label>
+        </div>
+        <label class="f">Масштаб<select id="baseScale"></select></label>
+        <div class="row">
+          <span class="note grow">Сдвинуть на 1 чанк</span>
+          <button class="btn icon-btn" data-move="0,-1" aria-label="На север">↑</button>
+          <button class="btn icon-btn" data-move="0,1" aria-label="На юг">↓</button>
+          <button class="btn icon-btn" data-move="-1,0" aria-label="На запад">←</button>
+          <button class="btn icon-btn" data-move="1,0" aria-label="На восток">→</button>
+        </div>
+        <div class="row"><button class="btn" id="baseToSel">Центр базы в выбранный чанк</button></div>
+        <p class="note mono" id="baseInfo"></p>
+      </section>
+      <section class="sec">
+        <h2>Мои правки базы</h2>
+        <p class="note">Правки, сделанные на странице «Лотос Легиона»: там кнопка «Скопировать для планировщика», здесь — вставить.</p>
+        <div class="row"><button class="btn" id="importBase">Вставить правки…</button></div>
+        <p class="note" id="editsInfo"></p>
+      </section>
+    </div>
 
-    <section class="sec">
-      <h2>База «Лотос Легиона»</h2>
-      <div class="row">
-        <label class="chip"><input type="checkbox" id="basePlaced"><span class="dot" style="background:var(--accent)"></span>На платформе</label>
-        <label class="chip"><input type="checkbox" id="baseHidden"><span class="dot" style="background:var(--muted)"></span>Скрыть в 3D</label>
-      </div>
-      <label class="f">Масштаб<select id="baseScale"></select></label>
-      <div class="row">
-        <span class="note grow">Сдвиг на 1 чанк</span>
-        <button class="btn icon-btn" data-move="0,-1" aria-label="На север">↑</button>
-        <button class="btn icon-btn" data-move="0,1" aria-label="На юг">↓</button>
-        <button class="btn icon-btn" data-move="-1,0" aria-label="На запад">←</button>
-        <button class="btn icon-btn" data-move="1,0" aria-label="На восток">→</button>
-      </div>
-      <div class="row"><button class="btn" id="baseToSel">Центр базы в выбранный чанк</button></div>
-      <p class="note mono" id="baseInfo"></p>
-      <div class="row"><button class="btn" id="importBase">Вставить мои правки базы…</button></div>
-      <p class="note" id="editsInfo"></p>
-    </section>
-
-    <section class="sec">
-      <h2>Платформа</h2>
-      <div class="coords3">
-        <label class="f">Размер, чанков<input type="number" id="plSize" min="8" max="48" step="1"></label>
-        <label class="f">Чанк X угла<input type="number" id="plCX" step="1"></label>
-        <label class="f">Чанк Z угла<input type="number" id="plCZ" step="1"></label>
-      </div>
-      <div class="row"><button class="btn" id="plApply">Применить</button><button class="btn" id="plCenter">По центру базы</button></div>
-      <p class="note mono" id="plInfo"></p>
-    </section>
+    <div data-pane="platform" hidden>
+      <section class="sec">
+        <h2>Платформа</h2>
+        <p class="note">Ровная площадка под планирование. Угол задаётся номером чанка в мире.</p>
+        <div class="coords3">
+          <label class="f">Размер, чанков<input type="number" id="plSize" min="8" max="48" step="1"></label>
+          <label class="f">Чанк X угла<input type="number" id="plCX" step="1"></label>
+          <label class="f">Чанк Z угла<input type="number" id="plCZ" step="1"></label>
+        </div>
+        <div class="row"><button class="btn" id="plApply">Применить</button><button class="btn" id="plCenter">По центру базы</button></div>
+        <p class="note mono" id="plInfo"></p>
+      </section>
+    </div>
   </aside>
 </div>
 

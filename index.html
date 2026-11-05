@@ -3,97 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Карта мира</title>
+<title>Главная</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="css/style.css">
+<script>/* old links to the map (index.html?x=..&z=..) now open map.html */ if (/[?&]x=/.test(location.search)) location.replace('map.html' + location.search);</script>
 </head>
 <body>
-<div class="app">
-  <aside class="side" aria-label="Метки и инструменты">
-    <section class="sec">
-      <h2>Найти место</h2>
-      <div class="row">
-        <input type="search" id="goto" class="grow" placeholder="X Z, например 120 -340" aria-label="Перейти к координатам">
-        <button class="btn" id="gotoBtn">Перейти</button>
-      </div>
-      <div class="row">
-        <label class="f grow">Измерение
-          <select id="dimSel"><option value="overworld">Верхний мир</option><option value="nether">Незер</option><option value="end">Энд</option></select></label>
-      </div>
-      <div class="row">
-        <label class="chip"><input type="checkbox" id="showGrid" checked><span class="dot" style="background:var(--muted)"></span>Сетка чанков</label>
-        <label class="chip"><input type="checkbox" id="showPlan" checked><span class="dot" style="background:var(--accent)"></span>План</label>
-      </div>
-    </section>
-
-    <section class="sec" id="formSec" hidden>
-      <h2 id="formTitle">Новая метка</h2>
-      <label class="f">Название<input type="text" id="mName" maxlength="80" placeholder="например, Деревня у реки"></label>
-      <label class="f">Тип<select id="mCat"></select></label>
-      <div class="coords3">
-        <label class="f">X<input type="number" id="mX" step="1"></label>
-        <label class="f">Y<input type="number" id="mY" step="1" placeholder="—"></label>
-        <label class="f">Z<input type="number" id="mZ" step="1"></label>
-      </div>
-      <label class="f">Заметка<textarea id="mNote" maxlength="600" placeholder="что там есть, что нужно сделать"></textarea></label>
-      <div class="row">
-        <button class="btn primary" id="mSave">Сохранить метку</button>
-        <button class="btn" id="mCancel">Отмена</button>
-        <span class="spacer"></span>
-        <button class="btn danger" id="mDelete" hidden>Удалить</button>
-      </div>
-      <p class="note">Можно не вводить координаты, а кликнуть по карте: точка переедет туда.</p>
-    </section>
-
-    <section class="sec">
-      <div class="row"><h2 class="grow">Метки <small id="mCount"></small></h2><button class="btn primary" id="addBtn">+ Метка</button></div>
-      <input type="search" id="search" placeholder="Поиск по названию и заметке" aria-label="Поиск меток">
-      <div class="chips" id="catFilter"></div>
-    </section>
-    <div class="list" id="mList"></div>
-
-    <section class="sec">
-      <h2>Картинка карты <small id="mapDimName"></small></h2>
-      <p class="note" id="mapInfo"></p>
-      <label class="f">Файл в репозитории<input type="text" id="imgPath" placeholder="map/overworld.png"></label>
-      <div class="coords3">
-        <label class="f">X левого края<input type="number" id="imgX" step="1"></label>
-        <label class="f">Z верхнего края<input type="number" id="imgZ" step="1"></label>
-        <label class="f">Блоков в пикселе<input type="number" id="imgBpp" step="0.25" min="0.0625"></label>
-      </div>
-      <div class="row">
-        <button class="btn" id="imgApply">Применить</button>
-        <label class="btn" for="imgLocal">Открыть с компьютера…</label><input type="file" id="imgLocal" accept="image/*" hidden>
-      </div>
-      <div class="row"><button class="btn" id="calibBtn">Привязать по двум точкам</button></div>
-      <p class="note">«Открыть с компьютера» показывает картинку только тебе. Чтобы её видели все, положи файл в папку <b class="mono">map/</b> репозитория и впиши путь выше.</p>
-    </section>
-    <section class="sec">
-      <h2>Сид</h2>
-      <p class="note" id="seedInfo"></p>
-    </section>
-  </aside>
-  <main class="stage">
-    <div id="map" style="position:absolute;inset:0"></div>
-    <div class="toolbar">
-      <button class="btn" id="measureBtn" aria-pressed="false">Линейка</button>
-      <button class="btn" id="centerBtn">К центру 0, 0</button>
-    </div>
-    <div class="banner" id="noMap" hidden>
-      <h3>Картинка мира ещё не добавлена</h3>
-      <p class="note">Сетка и метки работают и без неё. Чтобы увидеть сам мир, сделай картинку в программе uNmINeD из папки сохранения и добавь её в разделе «Картинка карты» слева. Подробно — в файле README.</p>
-      <div class="row" style="margin-top:8px"><button class="btn sm" id="noMapHide">Понятно</button></div>
-    </div>
-    <div class="banner" id="calibBox" hidden></div>
-    <div class="hud" id="hud">Наведи на карту</div>
-  </main>
-</div>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<main class="page"><div class="wrap" id="root"></div></main>
 <script src="js/config.js"></script>
 <script src="js/common.js"></script>
-<script src="js/map.js"></script>
+<script src="js/home.js"></script>
 </body>
 </html>

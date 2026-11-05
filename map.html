@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Карта мира</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <main class="stage">
+    <div id="map" style="position:absolute;inset:0"></div>
+    <div class="toolbar">
+      <button class="btn primary" id="addBtn">+ Поставить метку</button>
+      <div class="goto"><input type="search" id="goto" placeholder="X Z, например 120 -340" aria-label="Перейти к координатам"><button class="btn sm" id="gotoBtn">Перейти</button></div>
+      <button class="btn" id="measureBtn" aria-pressed="false">Линейка</button>
+      <button class="btn" id="centerBtn">К центру 0, 0</button>
+    </div>
+    <div class="banner" id="noMap" hidden>
+      <h3>Картинка мира ещё не добавлена</h3>
+      <p class="note">Сетка, метки и план уже работают. Саму местность модератор добавляет картинкой из программы uNmINeD: вкладка «Вид и картинка» справа. Подробно — в README.</p>
+      <div class="row" style="margin-top:10px"><button class="btn sm" id="noMapHide">Понятно</button></div>
+    </div>
+    <div class="banner" id="calibBox" hidden></div>
+    <div class="hud" id="hud">Наведи на карту: здесь будут координаты. Правый клик — меню точки.</div>
+  </main>
+
+  <aside class="side" aria-label="Метки и настройки карты">
+    <div class="ptabs" role="tablist">
+      <button role="tab" data-tab="marks" aria-selected="true">Метки <span class="note" id="mCount"></span></button>
+      <button role="tab" data-tab="view" aria-selected="false">Вид и картинка</button>
+    </div>
+
+    <div data-pane="marks">
+      <section class="sec" id="formSec" hidden>
+        <h2 id="formTitle">Новая метка</h2>
+        <label class="f">Название<input type="text" id="mName" maxlength="80" placeholder="например, Деревня у реки"></label>
+        <label class="f">Тип<select id="mCat"></select></label>
+        <div class="coords3">
+          <label class="f">X<input type="number" id="mX" step="1"></label>
+          <label class="f">Y (можно пусто)<input type="number" id="mY" step="1" placeholder="—"></label>
+          <label class="f">Z<input type="number" id="mZ" step="1"></label>
+        </div>
+        <label class="f">Заметка<textarea id="mNote" maxlength="600" placeholder="что там есть, что нужно сделать"></textarea></label>
+        <p class="note">Кликни по карте, чтобы переставить точку, или перетащи её.</p>
+        <div class="row">
+          <button class="btn primary" id="mSave">Сохранить метку</button>
+          <button class="btn" id="mCancel">Отмена</button>
+          <span class="spacer"></span>
+          <button class="btn danger" id="mDelete" hidden>Удалить</button>
+        </div>
+      </section>
+      <section class="sec">
+        <input type="search" id="search" placeholder="Найти метку по названию или заметке" aria-label="Поиск меток">
+        <div class="chips" id="catFilter"></div>
+      </section>
+      <div class="list" id="mList"></div>
+    </div>
+
+    <div data-pane="view" hidden>
+      <section class="sec">
+        <h2>Что показывать</h2>
+        <label class="f">Измерение
+          <select id="dimSel"><option value="overworld">Верхний мир</option><option value="nether">Незер</option><option value="end">Энд</option></select></label>
+        <div class="row">
+          <label class="chip"><input type="checkbox" id="showGrid" checked><span class="dot" style="background:var(--muted)"></span>Сетка чанков</label>
+          <label class="chip"><input type="checkbox" id="showPlan" checked><span class="dot" style="background:var(--accent)"></span>План базы и задачи</label>
+        </div>
+      </section>
+      <section class="sec">
+        <h2>Картинка мира <small id="mapDimName"></small></h2>
+        <p class="note" id="mapInfo"></p>
+        <label class="f">Файл в репозитории<input type="text" id="imgPath" placeholder="map/overworld.png"></label>
+        <div class="coords3">
+          <label class="f">X левого края<input type="number" id="imgX" step="1"></label>
+          <label class="f">Z верхнего края<input type="number" id="imgZ" step="1"></label>
+          <label class="f">Блоков в пикселе<input type="number" id="imgBpp" step="0.25" min="0.0625"></label>
+        </div>
+        <div class="row">
+          <button class="btn" id="imgApply">Применить</button>
+          <button class="btn" id="calibBtn">Привязать по двум точкам</button>
+        </div>
+        <div class="row"><label class="btn" for="imgLocal">Посмотреть картинку с компьютера…</label><input type="file" id="imgLocal" accept="image/*" hidden></div>
+        <p class="note">«С компьютера» видишь только ты. Чтобы видели все, файл кладут в папку <b class="mono">map/</b> репозитория и вписывают путь выше.</p>
+      </section>
+      <section class="sec">
+        <h2>Сид мира</h2>
+        <p class="note" id="seedInfo"></p>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/config.js"></script>
+<script src="js/common.js"></script>
+<script src="js/map.js"></script>
+</body>
+</html>

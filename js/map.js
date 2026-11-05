@@ -15,6 +15,7 @@
   await App.init();
   await App.load();
   App.mountTop('map');
+  const showTab = App.tabs(document.querySelector('.side'));
   const W = () => App.world;
   let dim = 'overworld';
 
@@ -179,7 +180,7 @@
     $('mList').innerHTML = vis.length ? vis.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru')).map(m => {
       const c = CATS[m.cat] || CATS.other;
       return `<div class="item" role="button" tabindex="0" data-id="${m.id}"><span class="pin" style="background:${c.color}"></span><span class="t">${esc(m.name || 'Без названия')}</span><span class="c">${sgn(m.x)} ${m.y ?? '~'} ${sgn(m.z)}</span><span class="r">${c.ru}</span></div>`;
-    }).join('') : `<div class="empty">${all ? 'Ничего не найдено. Проверь поиск и фильтры.' : 'Меток пока нет. Нажми «+ Метка» или кликни по карте правой кнопкой.'}</div>`;
+    }).join('') : `<div class="empty">${all ? 'Ничего не найдено. Проверь поиск и фильтры.' : 'Меток пока нет. Нажми «+ Поставить метку» сверху или кликни по карте правой кнопкой.'}</div>`;
   }
   $('mList').addEventListener('click', e => { const it = e.target.closest('.item'); if (it) focusMarker(it.dataset.id); });
   $('mList').addEventListener('keydown', e => { if (e.key === 'Enter') { const it = e.target.closest('.item'); if (it) focusMarker(it.dataset.id); } });
@@ -201,7 +202,7 @@
   let editing = null, draft = null;
   const draftLayer = L.layerGroup().addTo(map);
   function openForm(m, x, z) {
-    editing = m ? m.id : null;
+    editing = m ? m.id : null; showTab('marks');
     $('formSec').hidden = false; $('formTitle').textContent = m ? 'Изменить метку' : 'Новая метка';
     $('mName').value = m ? m.name : ''; $('mCat').value = m ? m.cat : 'other';
     const c = map.getCenter();
