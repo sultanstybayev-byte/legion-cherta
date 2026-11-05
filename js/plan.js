@@ -172,16 +172,49 @@
     const k = lotusKey(def), c = lotusCache.get(def.id); if (c && c.key === k) return c;
     const L = generateTemple();
     for (const e of def.edits || []) if (Array.isArray(e) && e.length === 4) L.set(e[0] | 0, e[1] | 0, e[2] | 0, e[3] | 0);
-    const N = L.N, list = [], occ = (x, y, z) => L.get(x, y, z) > 0;
-    for (let y = 0; y < L.H; y++) for (let z = -N; z <= N; z++) for (let x = -N; x <= N; x++) {
-      const m = L.get(x, y, z); if (!m) continue;
+    // visible blocks only (at least one open side); the buffers have spare room so blocks can be added in place
+    const N = L.N, occ = (x, y, z) => L.get(x, y, z) > 0, vis = [];
+    for (let y = 0; y < L.HMAX; y++) for (let z = -N; z <= N; z++) for (let x = -N; x <= N; x++) {
+      if (!L.get(x, y, z)) continue;
       if (occ(x + 1, y, z) && occ(x - 1, y, z) && occ(x, y + 1, z) && occ(x, y - 1, z) && occ(x, y, z + 1) && occ(x, y, z - 1)) continue;
-      list.push(x, y, z, m);
+      vis.push(x, y, z);
     }
-    const n = list.length / 4, mat = new Float32Array(n * 16), col = new Float32Array(n * 3), cells = new Map();
-    for (let i = 0; i < n; i++) { tmpM.makeTranslation(list[4 * i] + .5, list[4 * i + 1] + .5, list[4 * i + 2] + .5); tmpM.toArray(mat, i * 16); tmpC.set(MATS[list[4 * i + 3]] || '#dddddd'); col.set([tmpC.r, tmpC.g, tmpC.b], i * 3);
-      const ck = cellKey(list[4 * i], list[4 * i + 1], list[4 * i + 2]); let a = cells.get(ck); if (!a) cells.set(ck, a = []); a.push(i); }
-    const out = { key: k, L, n, mat, col, cells }; lotusCache.set(def.id, out); return out;
+    const n = vis.length / 3, cap = n + 20000;
+    const out = { key: k, L, n, cap, mat: new Float32Array(cap * 16), col: new Float32Array(cap * 3), pos: new Int16Array(cap * 3), index: new Map(), cells: null };
+    for (let i = 0; i < n; i++) setInst(out, i, vis[3 * i], vis[3 * i + 1], vis[3 * i + 2]);
+    lotusCache.set(def.id, out); return out;
+  }
+  function setInst(c, i, x, y, z) {
+    tmpM.makeTranslation(x + .5, y + .5, z + .5); tmpM.toArray(c.mat, i * 16);
+    tmpC.set(MATS[c.L.get(x, y, z)] || '#dddddd'); c.col[3 * i] = tmpC.r; c.col[3 * i + 1] = tmpC.g; c.col[3 * i + 2] = tmpC.b;
+    c.pos[3 * i] = x; c.pos[3 * i + 1] = y; c.pos[3 * i + 2] = z; c.index.set(x + ',' + y + ',' + z, i);
+  }
+  function cellsOf(c) {
+    if (c.cells) return c.cells; const m = c.cells = new Map();
+    for (let i = 0; i < c.n; i++) { const k = cellKey(c.pos[3 * i], c.pos[3 * i + 1], c.pos[3 * i + 2]); let a = m.get(k); if (!a) m.set(k, a = []); a.push(i); }
+    return m;
+  }
+  // change one block of a model and refresh only the instances around it; false if the buffers are full
+  function editBlock(def, x, y, z, m) {
+    const c = lotusCache.get(def.id); if (!c || !c.L.inside(x, y, z)) return false;
+    c.L.set(x, y, z, m);
+    const L = c.L, occ = (a, b, d) => L.get(a, b, d) > 0;
+    for (const [dx, dy, dz] of [[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+      const px = x + dx, py = y + dy, pz = z + dz, key = px + ',' + py + ',' + pz, has = c.index.get(key);
+      const want = occ(px, py, pz) && !(occ(px + 1, py, pz) && occ(px - 1, py, pz) && occ(px, py + 1, pz) && occ(px, py - 1, pz) && occ(px, py, pz + 1) && occ(px, py, pz - 1));
+      if (want && has === undefined) { if (c.n >= c.cap) return false; setInst(c, c.n++, px, py, pz); }
+      else if (want) setInst(c, has, px, py, pz);                // material may have changed
+      else if (has !== undefined) {                              // remove: move the last instance into the hole
+        const last = --c.n; c.index.delete(key);
+        if (has !== last) { c.mat.copyWithin(has * 16, last * 16, last * 16 + 16); c.col.copyWithin(has * 3, last * 3, last * 3 + 3); c.pos.copyWithin(has * 3, last * 3, last * 3 + 3);
+          c.index.set(c.pos[3 * has] + ',' + c.pos[3 * has + 1] + ',' + c.pos[3 * has + 2], has); }
+      }
+    }
+    c.cells = null; return true;
+  }
+  function uploadMesh(def, m) {
+    const c = lotusCache.get(def.id); if (!c) return;
+    m.instanceMatrix.array.set(c.mat.subarray(0, c.n * 16)); m.instanceMatrix.needsUpdate = true; m.count = c.n; recolor(def, m, null);
   }
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 
@@ -194,17 +227,16 @@
   const zc = new THREE.Color(), bc = new THREE.Color();
   function recolor(def, mesh, keys) {      // keys: changed cells, or null for all
     const c = lotusCache.get(def.id); if (!c || !mesh.instanceColor) return;
-    const zm = zonesOf(def), arr = mesh.instanceColor.array;
+    const zm = zonesOf(def), arr = mesh.instanceColor.array; if (!keys) arr.set(c.col.subarray(0, c.n * 3));
     const one = (ck, idx) => { const z = zm.get(ck); for (const i of idx) { bc.setRGB(c.col[3 * i], c.col[3 * i + 1], c.col[3 * i + 2]); if (z != null) bc.lerp(zc.set(ZONE_COLORS[z] || '#ff00ff'), .78); arr[3 * i] = bc.r; arr[3 * i + 1] = bc.g; arr[3 * i + 2] = bc.b; } };
-    if (keys) { for (const k of keys) { const idx = c.cells.get(k); if (idx) one(k, idx); } } else for (const [k, idx] of c.cells) one(k, idx);
+    const cells = cellsOf(c); if (keys) { for (const k of keys) { const idx = cells.get(k); if (idx) one(k, idx); } } else for (const [k, idx] of cells) if (zm.has(k)) one(k, idx);
     mesh.instanceColor.needsUpdate = true;
   }
   function makeMesh(def, s) {
     if (isModel(def)) {
-      const c = lotusData(def), m = new THREE.InstancedMesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, c.n));
-      m.instanceMatrix.array.set(c.mat); m.instanceMatrix.needsUpdate = true;
-      m.instanceColor = new THREE.InstancedBufferAttribute(c.col.slice(), 3); m.count = c.n; m.userData.def = def.id;
-      recolor(def, m, null); return m;
+      const c = lotusData(def), m = new THREE.InstancedMesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), c.cap);
+      m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(c.cap * 3), 3); m.userData.def = def.id;
+      uploadMesh(def, m); return m;
     }
     const g = new THREE.Group(), fp = App.footprint(def, s), w = fp.x1 - fp.x0, d = fp.z1 - fp.z0;
     const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: new THREE.Color(def.color), transparent: true, opacity: .55 }));
@@ -327,7 +359,7 @@
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   canvas.addEventListener('pointerdown', e => {
     canvas.focus({ preventScroll: true });
-    if (walk.on) { if (document.pointerLockElement !== canvas) lockMouse(); return; }
+    if (walk.on) { if (document.pointerLockElement !== canvas) lockMouse(); else if (e.button === 0) editAtAim(false); else if (e.button === 2) editAtAim(true); return; }
     if (e.pointerType === 'touch') { touches.set(e.pointerId, [e.clientX, e.clientY]); if (touches.size === 2) { const [a, b] = [...touches.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); } }
     canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, id: e.pointerId, t: Date.now(), moved: false, shift: e.shiftKey || e.ctrlKey || e.metaKey }; canvas.style.cursor = rectMode ? 'crosshair' : 'grabbing';
     if (rectMode && e.button === 0 && e.pointerType !== 'touch' || rectMode && e.pointerType === 'touch' && touches.size === 1) { const c = chunkAt(e.clientX, e.clientY); if (c) rect = { a: c, keep: drag.shift ? new Set(sel) : new Set() }; }
@@ -441,7 +473,7 @@
     storeZones(def); App.save('structdefs'); renderZones(); redraw();
   });
   $('rectBtn').onclick = () => { if (brush.on && !rectMode) setBrush(false); rectMode = !rectMode; $('rectBtn').setAttribute('aria-pressed', String(rectMode)); canvas.style.cursor = rectMode ? 'crosshair' : 'grab'; App.toast(rectMode ? 'Тяни мышью по платформе, чтобы выделить прямоугольник чанков. Shift — добавить к выбранным.' : 'Выделение рамкой выключено', 3500); };
-  canvas.addEventListener('wheel', e => { e.preventDefault(); if (walk.on) return; move(0, 0, 0, -e.deltaY * 0.12); }, { passive: false });
+  canvas.addEventListener('wheel', e => { e.preventDefault(); if (walk.on) { pickSlot((slot + (e.deltaY > 0 ? 1 : -1) + HOTBAR.length) % HOTBAR.length); return; } move(0, 0, 0, -e.deltaY * 0.12); }, { passive: false });
 
   const keys = new Set(); let kbRaf = 0, kbLast = 0;
   const KB = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
@@ -482,9 +514,10 @@
     while (hits(walk.px, walk.py, walk.pz) && walk.py < 400) walk.py += 1;
     $('walkBtn').textContent = 'Выйти (Esc)'; $('walkBtn').setAttribute('aria-pressed', 'true'); document.body.classList.add('walking');
     $('hud').dataset.text = $('hud').dataset.text || $('hud').innerHTML;
-    $('hud').innerHTML = '<b>W</b><b>A</b><b>S</b><b>D</b> идти · <b>Space</b> прыжок · <b>Shift</b> бег · <b>F</b> полёт (Space/C — вверх/вниз) · мышь — смотреть · <b>Esc</b> — выйти · <span id="camPos"></span>';
+    $('hud').innerHTML = '<b>W</b><b>A</b><b>S</b><b>D</b> идти · <b>Space</b> прыжок · <b>Shift</b> бег · <b>F</b> полёт (Space/C — вверх/вниз) · мышь — смотреть' + (CAN ? ' · <b>ЛКМ</b> сломать · <b>ПКМ</b> поставить · <b>1–9</b>/колесо — блок' : '') + ' · <b>Esc</b> — выйти · <span id="camPos"></span>';
     if (brush.on) setBrush(false); if (rectMode) $('rectBtn').click();
     for (const o of [...compass, ...labels]) o.visible = false; if (compassArrow) compassArrow.visible = false;
+    $('hotbar').hidden = !CAN; renderHotbar();
     lockMouse(); canvas.focus(); walk.last = performance.now(); walk.raf = requestAnimationFrame(walkTick);
   }
   function stopWalk() {
@@ -492,6 +525,7 @@
     if (document.pointerLockElement === canvas) document.exitPointerLock();
     Object.assign(cam, walk.saved || {}); $('walkBtn').textContent = 'Войти внутрь'; $('walkBtn').setAttribute('aria-pressed', 'false'); document.body.classList.remove('walking');
     for (const o of [...compass, ...labels]) o.visible = true; if (compassArrow) compassArrow.visible = true;
+    $('hotbar').hidden = true; if (aimBox) aimBox.visible = false; flushEdits();
     if ($('hud').dataset.text) $('hud').innerHTML = $('hud').dataset.text; redraw();
   }
   function walkTick(now) {
@@ -513,12 +547,13 @@
     }
     const oy = walk.py; walk.py += walk.vy * dt; walk.ground = false;
     if (hits(walk.px, walk.py, walk.pz)) { if (walk.vy < 0) { walk.py = Math.floor(walk.py) + 1; walk.ground = true; if (hits(walk.px, walk.py, walk.pz)) walk.py = oy; } else walk.py = oy; walk.vy = 0; }
-    cam.x = walk.px; cam.y = walk.py + EYE; cam.z = walk.pz; draw();
+    cam.x = walk.px; cam.y = walk.py + EYE; cam.z = walk.pz; updateAim(); draw();
     walk.raf = requestAnimationFrame(walkTick);
   }
   document.addEventListener('keydown', e => {
     if (!walk.on) return;
     if (e.code === 'Escape') { stopWalk(); return; }
+    if (/^Digit[1-9]$/.test(e.code)) { pickSlot(+e.code.slice(5) - 1); return; }
     if (e.code === 'KeyF') { walk.fly = !walk.fly; walk.vy = 0; App.toast(walk.fly ? 'Полёт: Space — вверх, C — вниз' : 'Полёт выключен', 1800); return; }
     if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ControlLeft', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) { e.preventDefault(); walk.keys.add(e.code); }
   });
@@ -526,6 +561,63 @@
   document.addEventListener('mousemove', e => { if (!walk.on || document.pointerLockElement !== canvas || performance.now() - (walk.lockedAt || 0) < 150 || Math.abs(e.movementX) > 250 || Math.abs(e.movementY) > 250) return; cam.yaw -= e.movementX * 0.0022; cam.pitch = Math.min(1.55, Math.max(-1.55, cam.pitch - e.movementY * 0.0022)); });
   document.addEventListener('pointerlockchange', () => { if (walk.on && document.pointerLockElement !== canvas && walk.wasLocked) stopWalk(); walk.wasLocked = document.pointerLockElement === canvas; if (walk.wasLocked) walk.lockedAt = performance.now(); });
   $('walkBtn').onclick = () => walk.on ? stopWalk() : startWalk();
+
+  /* breaking and placing blocks in walk mode; changes are stored on the structure as edits [x, y, z, block] in its own coordinates */
+  const HOTBAR = [[3, 'Гладкий кварц'], [2, 'Кальцит'], [5, 'Полир. диорит'], [1, 'Андезит'], [11, 'Стекло'], [9, 'Белый бетон'], [4, 'Оранжевый бетон'], [7, 'Морской фонарь'], [8, 'Светокамень']];
+  let slot = 0, aim = null, aimBox = null, editTimer = 0;
+  const editMaps = new WeakMap();
+  function editsOf(def) { let m = editMaps.get(def); if (!m) { m = new Map(); for (const e of def.edits || []) if (Array.isArray(e) && e.length === 4) m.set(e[0] + ',' + e[1] + ',' + e[2], e[3] | 0); editMaps.set(def, m); } return m; }
+  function renderHotbar() { $('hotbar').innerHTML = HOTBAR.map(([m, n], i) => `<div class="slot${i === slot ? ' on' : ''}" title="${n}"><i style="background:${MATS[m]}"></i><span>${i + 1}</span></div>`).join('') + `<div class="slotname">${HOTBAR[slot][1]}</div>`; }
+  function pickSlot(i) { slot = i; renderHotbar(); }
+  const toLocal = (s, def, x, z) => { const fp = App.footprint(def, s), a = (s.rot || 0) * Math.PI / 2, wx = x + .5 - fp.ox, wz = z + .5 - fp.oz;
+    return [Math.floor(wx * Math.cos(a) + wz * Math.sin(a) + 1e-6), Math.floor(-wx * Math.sin(a) + wz * Math.cos(a) + 1e-6)]; };
+  // block under the crosshair within reach: { x, y, z, s, px, py, pz } (p = the empty cell in front of the hit face)
+  function aimRay() {
+    const d = [-Math.sin(cam.yaw) * Math.cos(cam.pitch), Math.sin(cam.pitch), -Math.cos(cam.yaw) * Math.cos(cam.pitch)], o = [cam.x, cam.y, cam.z];
+    let x = Math.floor(o[0]), y = Math.floor(o[1]), z = Math.floor(o[2]), px = x, py = y, pz = z;
+    const st = d.map(v => v > 0 ? 1 : -1), td = d.map(v => Math.abs(1 / (v || 1e-9)));
+    let t = [0, 1, 2].map(i => (d[i] > 0 ? (Math.floor(o[i]) + 1 - o[i]) : (o[i] - Math.floor(o[i]))) * td[i]);
+    for (let i = 0; i < 40; i++) {
+      px = x; py = y; pz = z;
+      if (t[0] < t[1] && t[0] < t[2]) { if (t[0] > 6) break; x += st[0]; t[0] += td[0]; } else if (t[1] < t[2]) { if (t[1] > 6) break; y += st[1]; t[1] += td[1]; } else { if (t[2] > 6) break; z += st[2]; t[2] += td[2]; }
+      if (y < 0) return { x, y, z, s: null, ground: true, px, py, pz };
+      const s = solidAt(x, y, z); if (s) return { x, y, z, s, px, py, pz };
+    }
+    return null;
+  }
+  function updateAim() {
+    aim = CAN ? aimRay() : null;
+    if (!aimBox) { aimBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004)), new THREE.LineBasicMaterial({ color: 0x111111 })); scene.add(aimBox); }
+    aimBox.visible = !!(aim && aim.s); if (aimBox.visible) aimBox.position.set(aim.x + .5, aim.y + .5, aim.z + .5);
+  }
+  function structAtCell(x, z) { for (const s of insts()) { const def = defOf(s.def); if (!def || !isModel(def)) continue; const fp = App.footprint(def, s); if (x >= fp.x0 && x < fp.x1 && z >= fp.z0 && z < fp.z1) return s; } return null; }
+  function editAtAim(place) {
+    if (!CAN) { App.toast('Менять блоки могут модераторы.', 2500); return; }
+    const a = aimRay(); if (!a || (!place && !a.s)) return;
+    const tx = place ? a.px : a.x, ty = place ? a.py : a.y, tz = place ? a.pz : a.z;
+    const s = place ? (a.s && isModel(defOf(a.s.def)) ? a.s : structAtCell(tx, tz)) : a.s, def = s && defOf(s.def);
+    if (!def || !isModel(def)) { App.toast(place ? 'Ставить блоки можно только внутри модели структуры.' : 'Эту структуру пока нельзя ломать: это заготовка.', 2500); return; }
+    if (place) {   // not inside the player
+      const bx0 = walk.px - PW2, bx1 = walk.px + PW2, bz0 = walk.pz - PW2, bz1 = walk.pz + PW2;
+      if (tx + 1 > bx0 && tx < bx1 && tz + 1 > bz0 && tz < bz1 && ty + 1 > walk.py && ty < walk.py + PH) return;
+    }
+    const [lx, lz] = toLocal(s, def, tx, tz), m = place ? HOTBAR[slot][0] : 0;
+    const c = lotusCache.get(def.id); if (!c || !c.L.inside(lx, ty, lz)) { App.toast('Здесь край модели: выше или дальше ставить нельзя.', 2500); return; }
+    if (c.L.get(lx, ty, lz) === m) return;
+    if (!editBlock(def, lx, ty, lz, m)) { App.toast('Слишком много новых блоков за раз. Выйди и зайди снова.', 3000); return; }
+    editsOf(def).set(lx + ',' + ty + ',' + lz, m);
+    for (const o of meshes.values()) if (o.userData.def === def.id) uploadMesh(def, o);
+    clearTimeout(editTimer); editTimer = setTimeout(flushEdits, 1500);
+  }
+  function flushEdits() {
+    clearTimeout(editTimer); let any = false;
+    for (const def of defs()) { const m = editMaps.get(def); if (!m) continue;
+      const next = [...m].map(([k, v]) => [...k.split(',').map(Number), v]);
+      if (JSON.stringify(next) !== JSON.stringify(def.edits || [])) { def.edits = next; any = true; const c = lotusCache.get(def.id); if (c) c.key = lotusKey(def); } }
+    if (any) App.save('structdefs');
+  }
+  window.addEventListener('beforeunload', flushEdits);
+  if (location.hash === '#test') Object.assign(App, { _walk: walk, _cam: cam });
 
   /* picking: walk the ray through base voxels, fall back to the ground plane */
   function chunkAt(clientX, clientY) {

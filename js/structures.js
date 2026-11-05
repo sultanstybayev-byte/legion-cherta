@@ -30,6 +30,8 @@
     $('dEdits').innerHTML = lot ? '127×127 блоков (8×8 чанков), 61 в высоту, бутон 72 в диаметре. 27 лепестков: 9 бутона, 9 средних (стоят на стыках входных), 9 низких входных козырьков. Внутри пусто: пол, 9 арок в зал, стеклянный потолок под бутоном, стекло в арках входов с проёмом 5×6.' : '';
     $('dDel').textContent = 'Удалить'; delArm = 0;
     ['dName', 'dColor', 'dNote', 'dW', 'dD', 'dH'].forEach(id => $(id).disabled = !CAN);
+    const ne = (d.edits || []).length; $('dEditCount').textContent = ne ? `Изменено блоков: ${fmt(ne)} (ломать и ставить — «План базы» → «Войти внутрь»).` : 'Блоки не менялись. Ломать и ставить — «План базы» → «Войти внутрь».';
+    $('clearEdits').hidden = !CAN || !ne; $('clearEdits').textContent = 'Сбросить правки блоков'; clearArm = 0;
   }
   function select(id) { cur = id; renderList(); renderEditor(); preview(); }
   $('defList').addEventListener('click', e => { const it = e.target.closest('[data-id]'); if (it) select(it.dataset.id); });
@@ -50,6 +52,12 @@
     W().structdefs = defs().filter(q => q.id !== d.id);
     if (n) { W().plan.structures = W().plan.structures.filter(s => s.def !== d.id); App.save('structures'); }
     App.save('structdefs'); cur = defs()[0] ? defs()[0].id : null; select(cur);
+  };
+  let clearArm = 0;
+  $('clearEdits').onclick = () => {
+    const d = defs().find(q => q.id === cur); if (!d) return;
+    if (Date.now() - clearArm > 3500) { clearArm = Date.now(); $('clearEdits').textContent = 'Точно? Модель станет исходной'; return; }
+    d.edits = []; App.save('structdefs'); renderEditor(); preview(); App.toast('Правки убраны, модель исходная');
   };
   /* ---------- 3D preview with an orbit camera ---------- */
   if (!window.THREE) { $('stage').innerHTML = '<div class="banner"><h3>3D не загрузился</h3><p class="note">Не удалось загрузить three.js.</p></div>'; renderList(); renderEditor(); return; }
