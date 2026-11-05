@@ -438,13 +438,26 @@
     sel.p1 = [s.x0 + v[0], s.y0 + v[1], s.z0 + v[2]]; sel.p2 = [s.x1 + v[0], s.y1 + v[1], s.z1 + v[2]]; drawSel(); return n;
   }
   // where the arrows stand: the selected shape, else the top of the selected area
+  // gizmo settings: arrows (move) or rings (rotate); turn around the shape's centre or its "Позиция" point; its own axes or the world's
+  const gz = { mode: App.pref('struct.gizMode', 'move'), pivot: App.pref('struct.pivot', 'centre'), orient: App.pref('struct.orient', 'local') };
+  const quatOf = q => new THREE.Quaternion().setFromEuler(new THREE.Euler(...q.rot.map(v => (v || 0) * Math.PI / 180), 'XYZ'));
+  function pivotOf(q) {
+    if (gz.pivot === 'base') return q.pos.slice();
+    const c = SH.cells(q); if (!c.length) return q.pos.slice(); const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    for (const v of c) for (let i = 0; i < 3; i++) { if (v[i] < mn[i]) mn[i] = v[i]; if (v[i] + 1 > mx[i]) mx[i] = v[i] + 1; }
+    return [0, 1, 2].map(i => (mn[i] + mx[i]) / 2);
+  }
   function updateGiz() {
     if (!giz || giz.active) return;
     const q = typeof curShape === 'function' ? curShape() : null, b = selBox();
     if (fp.on || !CAN || !vox || xf) giz.hide();
-    else if (q && !q.hidden && $('sGhost').checked) giz.show(q.pos);
-    else if (b) giz.show([(b.x0 + b.x1 + 1) / 2, b.y1 + 2, (b.z0 + b.z1 + 1) / 2]);
+    else if (q && !q.hidden && $('sGhost').checked) { giz.mode(gz.mode); giz.show(gz.mode === 'rotate' ? pivotOf(q) : q.pos, gz.orient === 'local' ? quatOf(q) : null); }
+    else if (b) { giz.mode('move'); giz.show([(b.x0 + b.x1 + 1) / 2, b.y1 + 2, (b.z0 + b.z1 + 1) / 2]); }
     else giz.hide();
+  }
+  function syncGizUI() {
+    document.querySelectorAll('#gizSeg [data-gm]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.gm === gz.mode)));
+    $('gizPivot').value = gz.pivot; $('gizOrient').value = gz.orient; $('gizPivotRow').hidden = gz.mode !== 'rotate';
   }
 
   /* ================= WorldEdit commands ================= */
@@ -653,6 +666,10 @@
   $('sApply').onclick = () => bakeShape(selShape); $('sDup').onclick = dupShape; $('sDel').onclick = () => removeShape(selShape);
   $('sApplyAll').onclick = () => { for (const q of shapes().filter(q => !q.hidden).slice()) bakeShape(q.id); };
   $('sGhost').onchange = drawGhosts;
+  document.querySelectorAll('#gizSeg [data-gm]').forEach(b => b.onclick = () => { gz.mode = b.dataset.gm; App.setPref('struct.gizMode', gz.mode); syncGizUI(); updateGiz(); redraw(); });
+  $('gizPivot').onchange = e => { gz.pivot = e.target.value; App.setPref('struct.pivot', gz.pivot); updateGiz(); redraw(); };
+  $('gizOrient').onchange = e => { gz.orient = e.target.value; App.setPref('struct.orient', gz.orient); updateGiz(); redraw(); };
+  syncGizUI();
   $('guidesOn').checked = App.pref('struct.guides', true);
   $('guidesOn').onchange = e => { App.setPref('struct.guides', e.target.checked); drawGhosts(); };
   $('sBlock').onclick = () => { const q = curShape(); if (!q) return; q.block = block(); shapesChanged(); };
@@ -715,8 +732,9 @@
       const dot = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false })); dot.position.copy(o); dot.renderOrder = 11; g.add(dot);
       gizmo = g; scene.add(g);
     }
-    if (giz) { if (giz.active && q) giz.show(q.pos); else updateGiz(); }
-    drawGuides(boxes); redraw();
+    drawGuides(boxes);
+    if (giz) { if (giz.active && q) { if (giz.kind === 'move') giz.show(q.pos); } else updateGiz(); }
+    redraw();
   }
   /* guides: centre lines and outlines of the model and of every shape; while moving a shape, lines that match light up */
   let guides = null, modelBB = null, guideQ = false, lastBoxes = new Map();
@@ -841,7 +859,8 @@
     const gAxis = giz && e.button === 0 ? giz.pick(camera, canvas, e.clientX, e.clientY) : -1;
     if (gAxis >= 0) {   // drag an arrow: the selected shape, or the blocks of the selected area, move along that axis
       const q = curShape(), b = selBox(), onShape = !!(q && !q.hidden && $('sGhost').checked);
-      drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, b: 0, moved: true, giz: onShape ? { axis: gAxis, q, start: q.pos.slice(), last: 0 } : { axis: gAxis, box: b, p1: sel.p1.slice(), p2: sel.p2.slice(), last: 0 } };
+      const dir = giz.axisDir(gAxis), R0 = new THREE.Matrix4().makeRotationFromQuaternion(onShape ? quatOf(q) : new THREE.Quaternion());
+      drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, b: 0, moved: true, giz: onShape ? { axis: gAxis, q, start: clone(q), dir, R0, C: pivotOf(q), rot: giz.kind === 'rotate', last: 0 } : { axis: gAxis, box: b, p1: sel.p1.slice(), p2: sel.p2.slice(), last: 0 } };
       giz.begin(camera, canvas, gAxis, e.clientX, e.clientY); canvas.style.cursor = 'move'; redraw(); return;
     }
     drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, b: e.button, moved: false, paint: tool === 'brush' && e.button === 0 && !!vox };
@@ -852,9 +871,15 @@
     if (xf) { updateXf(e); return; }
     if (fp.on) return;
     if (drag && drag.giz) {
-      const g = drag.giz, raw = giz.drag(camera, canvas, e.clientX, e.clientY), st = gizStep(e, !!g.q), n = +(Math.round(raw / st) * st).toFixed(2);
+      const g = drag.giz, raw = giz.drag(camera, canvas, e.clientX, e.clientY), st = g.rot ? (e.shiftKey ? 15 : 1) : gizStep(e, !!g.q), n = +(Math.round(raw / st) * st).toFixed(2);
       if (n === g.last) return; g.last = n;
-      if (g.q) { g.q.pos[g.axis] = +(g.start[g.axis] + n).toFixed(2); drawGhostsSoon(); $('weLog').textContent = `«${g.q.name}» по ${'XYZ'[g.axis]}: ${n > 0 ? '+' : ''}${n} → позиция ${g.q.pos.map(v => +(+v).toFixed(1)).join(' · ')}`; }
+      if (g.q && g.rot) {   // turn about the axis through the pivot: R = turn × R0, the position goes round the pivot
+        const Rw = new THREE.Matrix4().makeRotationAxis(g.dir, n * Math.PI / 180), Rn = Rw.clone().multiply(g.R0), eu = new THREE.Euler().setFromRotationMatrix(Rn, 'XYZ');
+        g.q.rot = [eu.x, eu.y, eu.z].map(v => +(v * 180 / Math.PI).toFixed(1));
+        const p = new THREE.Vector3(...g.start.pos).sub(new THREE.Vector3(...g.C)).applyMatrix4(Rw).add(new THREE.Vector3(...g.C)); g.q.pos = [p.x, p.y, p.z].map(v => +v.toFixed(2));
+        drawGhostsSoon(); $('weLog').textContent = `«${g.q.name}»: поворот вокруг ${gz.orient === 'local' ? 'своей' : ''} оси ${'XYZ'[g.axis]} на ${n > 0 ? '+' : ''}${n}° (Shift — по 15°) → поворот ${g.q.rot.join(' · ')}`;
+      }
+      else if (g.q) { g.q.pos = g.start.pos.map((v, i) => +(v + g.dir.getComponent(i) * n).toFixed(2)); drawGhostsSoon(); $('weLog').textContent = `«${g.q.name}» по ${'XYZ'[g.axis]}: ${n > 0 ? '+' : ''}${n} → позиция ${g.q.pos.map(v => +(+v).toFixed(1)).join(' · ')}`; }
       else { const v = [0, 0, 0]; v[g.axis] = n; sel.p1 = g.p1.map((a, i) => a + v[i]); sel.p2 = g.p2.map((a, i) => a + v[i]); drawSel(); giz.show([(Math.min(sel.p1[0], sel.p2[0]) + Math.max(sel.p1[0], sel.p2[0]) + 1) / 2, Math.max(sel.p1[1], sel.p2[1]) + 2, (Math.min(sel.p1[2], sel.p2[2]) + Math.max(sel.p1[2], sel.p2[2]) + 1) / 2]); $('weLog').textContent = `Выделение по ${'XYZ'[g.axis]}: ${n > 0 ? '+' : ''}${n} бл. — отпусти, чтобы перенести блоки`; }
       $('weLog').classList.add('on'); return;
     }
@@ -871,7 +896,7 @@
     if (!drag) return; const d = drag; drag = null;
     if (d.giz) {
       giz.end(); canvas.style.cursor = 'grab'; const g = d.giz;
-      if (g.q) { if (g.last) { saveShapesLater(); renderShapes(); } drawGhosts(); }
+      if (g.q) { if (g.last) { saveShapesLater(); renderShapes(); } drawGhosts(); updateGiz(); }
       else { sel.p1 = g.p1; sel.p2 = g.p2; const v = [0, 0, 0]; v[g.axis] = g.last; const n = g.last ? moveSel(v) : 0; if (g.last) weLog(`сдвинуто по ${'XYZ'[g.axis]} на ${g.last > 0 ? '+' : ''}${g.last}: ${fmt(n)} бл.${symActive() ? ' (с симметрией)' : ''} · Ctrl+Z — отменить`); else drawSel(); }
       redraw(); return;
     }

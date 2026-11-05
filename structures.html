@@ -7,7 +7,7 @@
 <script>/* theme before first paint: saved choice, dark by default */ try { document.documentElement.dataset.theme = localStorage.getItem("mcmap.theme") || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
-<link rel="stylesheet" href="css/style.css?v=1108">
+<link rel="stylesheet" href="css/style.css?v=1109">
 </head>
 <body>
 <div class="app">
@@ -121,13 +121,16 @@
         <label class="f">Название<input type="text" id="sName" maxlength="40"></label>
         <div class="row"><label class="f grow">Что делает<select id="sMode"><option value="add">Добавляет блоки</option><option value="cut">Вырезает (стирает блоки)</option></select></label></div>
         <div class="row"><span class="sblock" id="sBlockName"></span><button class="btn sm" id="sBlock">Взять блок из руки</button></div>
+        <div class="row"><span class="note">Ручки в 3D</span><div class="seg" id="gizSeg" role="group" aria-label="Ручки"><button class="btn sm" data-gm="move" aria-pressed="true">↔ Двигать</button><button class="btn sm" data-gm="rotate" aria-pressed="false">⟳ Вращать</button></div></div>
+        <div class="row" id="gizPivotRow" hidden><label class="f grow">Вращать вокруг<select id="gizPivot"><option value="centre">центра фигуры</option><option value="base">точки «Позиция» (основа лепестка)</option></select></label>
+          <label class="f grow">Оси<select id="gizOrient"><option value="local">свои (как повёрнута фигура)</option><option value="world">мира (X, Y, Z)</option></select></label></div>
         <div class="vec" data-v="pos"><span>Позиция</span><input type="number" step="0.5" data-i="0" aria-label="X"><input type="number" step="0.5" data-i="1" aria-label="Y"><input type="number" step="0.5" data-i="2" aria-label="Z"></div>
         <div class="vec" data-v="rot"><span>Поворот, °</span><input type="number" step="5" data-i="0" aria-label="вокруг X"><input type="number" step="5" data-i="1" aria-label="вокруг Y"><input type="number" step="5" data-i="2" aria-label="вокруг Z"></div>
         <div class="vec" data-v="size"><span>Размер</span><input type="number" step="1" min="1" data-i="0" aria-label="ширина"><input type="number" step="1" min="1" data-i="1" aria-label="высота"><input type="number" step="1" min="0.5" data-i="2" aria-label="глубина"></div>
         <p class="note" id="sSizeNote"></p>
         <div id="sParams" class="sparams"></div>
         <div class="row"><button class="btn primary" id="sApply">Применить в блоки</button><button class="btn" id="sDup">Копия</button><span class="spacer"></span><button class="btn danger" id="sDel">Удалить</button></div>
-        <p class="note keys"><b>Стрелки X/Y/Z</b> на фигуре — тяни мышью, шаг 1 блок (с <kbd>Shift</kbd> — 0,1). Стрелки есть и на выделенной области: тянешь — переносятся её блоки.<br><b>Клавиши, как в Blender:</b> <kbd>G</kbd> двигать · <kbd>R</kbd> вращать · <kbd>S</kbd> размер → потом <kbd>X</kbd>/<kbd>Y</kbd>/<kbd>Z</kbd> — по одной оси, <kbd>Shift</kbd> — точнее. Клик или <kbd>Enter</kbd> — готово, <kbd>Esc</kbd> или ПКМ — отмена. <kbd>Shift</kbd>+<kbd>D</kbd> — копия, <kbd>Delete</kbd> — удалить, <kbd>Enter</kbd> без действия — применить. Колесо над числом меняет его.</p>
+        <p class="note keys"><b>Ручки в 3D:</b> «Двигать» — стрелки X/Y/Z, шаг 1 блок (с <kbd>Shift</kbd> — 0,1); «Вращать» — кольца X/Y/Z вокруг своей оси фигуры, шаг 1° (с <kbd>Shift</kbd> — 15°). Стрелки есть и на выделенной области: тянешь — переносятся её блоки.<br><b>Клавиши, как в Blender:</b> <kbd>G</kbd> двигать · <kbd>R</kbd> вращать · <kbd>S</kbd> размер → потом <kbd>X</kbd>/<kbd>Y</kbd>/<kbd>Z</kbd> — по одной оси, <kbd>Shift</kbd> — точнее. Клик или <kbd>Enter</kbd> — готово, <kbd>Esc</kbd> или ПКМ — отмена. <kbd>Shift</kbd>+<kbd>D</kbd> — копия, <kbd>Delete</kbd> — удалить, <kbd>Enter</kbd> без действия — применить. Колесо над числом меняет его.</p>
       </div>
       <div class="row" id="shapeAllRow" hidden><button class="btn" id="sApplyAll">Применить все</button><label class="chip"><input type="checkbox" id="sGhost" checked><span class="dot" style="background:var(--accent)"></span>Показывать фигуры</label></div>
       <label class="chip"><input type="checkbox" id="guidesOn" checked><span class="dot" style="background:#ffd24a"></span>Направляющие: центры, оси и края</label>
@@ -156,7 +159,7 @@
 <script src="js/temple.js?v=1106"></script>
 <script src="js/vox.js?v=1108"></script>
 <script src="js/shapes.js?v=1106"></script>
-<script src="js/gizmo.js?v=1107"></script>
-<script src="js/structures.js?v=1108"></script>
+<script src="js/gizmo.js?v=1109"></script>
+<script src="js/structures.js?v=1109"></script>
 </body>
 </html>
