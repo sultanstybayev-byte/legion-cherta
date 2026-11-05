@@ -23,13 +23,16 @@
       </div>
       <button class="btn" id="undoBtn" title="Ctrl+Z">↶ Отменить</button>
       <button class="btn" id="redoBtn" title="Ctrl+Y">↷ Вернуть</button>
+      <span class="savestate" id="selInfo"></span>
       <span class="savestate" id="saveState"></span>
     </div>
     <div class="crosshair" aria-hidden="true"></div>
     <div class="hotbar" id="hotbar"></div>
     <div class="hud" id="hud"></div>
     <form class="cmdbar" id="cmdForm" autocomplete="off">
-      <input type="text" id="cmd" placeholder="Команда WorldEdit, например //set stone или //replace glass air  ·  //help — список" spellcheck="false">
+      <input type="text" id="cmd" placeholder="Команда: начни с // — появятся подсказки (например //set stone)" spellcheck="false">
+      <div class="cmdsug" id="cmdSug" hidden></div>
+      <pre class="cmdout" id="weLog"></pre>
     </form>
     <div class="banner" id="busy" hidden><h3 id="busyTitle">Загружаю модель…</h3><p class="note" id="busyNote">Это пара секунд.</p></div>
   </main>
@@ -100,32 +103,32 @@
       <p class="note" id="toolHelp"></p>
     </section>
 
-    <section class="sec" id="weSec" hidden>
-      <h2>WorldEdit <small id="selInfo"></small></h2>
-      <p class="note">Выдели область: инструмент «Выделение», ЛКМ — точка 1, ПКМ — точка 2. Блок для команд — выбранный выше.</p>
-      <div class="we">
-        <button class="btn sm" data-we="//set">Заполнить</button>
-        <button class="btn sm" data-we="//replace">Заменить…</button>
-        <button class="btn sm" data-we="//set air">Очистить</button>
-        <button class="btn sm" data-we="//walls">Стены</button>
-        <button class="btn sm" data-we="//faces">Коробка</button>
-        <button class="btn sm" data-we="//hollow">Пустая внутри</button>
-        <button class="btn sm" data-we="//copy">Копировать</button>
-        <button class="btn sm" data-we="//cut">Вырезать</button>
-        <button class="btn sm" data-we="//paste">Вставить</button>
-        <button class="btn sm" data-we="//rotate 90">Повернуть 90°</button>
-        <button class="btn sm" data-we="//flip">Отразить</button>
-        <button class="btn sm" data-we="//stack">Повторить…</button>
-        <button class="btn sm" data-we="//move">Сдвинуть…</button>
-        <button class="btn sm" data-we="//sphere">Шар…</button>
-        <button class="btn sm" data-we="//cyl">Цилиндр…</button>
-        <button class="btn sm" data-we="//pyramid">Пирамида…</button>
-        <button class="btn sm" data-we="//line">Линия</button>
-        <button class="btn sm" data-we="//count">Посчитать</button>
-        <button class="btn sm" data-we="//desel">Снять выделение</button>
-        <button class="btn sm" data-we="//help">Все команды</button>
+    <section class="sec" id="shapeSec" hidden>
+      <h2>Фигуры <small id="shapeCount"></small></h2>
+      <p class="note">Как объекты в Blender: добавь фигуру, подвинь, поверни, растяни, настрой — пока это полупрозрачный предпросмотр. «Применить в блоки» превращает её в блоки (с симметрией, если она включена).</p>
+      <div class="we" id="shapeAdd">
+        <button class="btn sm" data-add="petal">+ Лепесток</button>
+        <button class="btn sm" data-add="sphere">+ Шар</button>
+        <button class="btn sm" data-add="box">+ Куб</button>
+        <button class="btn sm" data-add="cyl">+ Цилиндр</button>
+        <button class="btn sm" data-add="cone">+ Конус</button>
+        <button class="btn sm" data-add="torus">+ Тор</button>
+        <button class="btn sm" data-add="pyramid">+ Пирамида</button>
       </div>
-      <pre class="welog" id="weLog"></pre>
+      <div class="shapelist" id="shapeList"></div>
+      <div id="shapeEd" class="shaped" hidden>
+        <label class="f">Название<input type="text" id="sName" maxlength="40"></label>
+        <div class="row"><label class="f grow">Что делает<select id="sMode"><option value="add">Добавляет блоки</option><option value="cut">Вырезает (стирает блоки)</option></select></label></div>
+        <div class="row"><span class="sblock" id="sBlockName"></span><button class="btn sm" id="sBlock">Взять блок из руки</button></div>
+        <div class="vec" data-v="pos"><span>Позиция</span><input type="number" step="0.5" data-i="0" aria-label="X"><input type="number" step="0.5" data-i="1" aria-label="Y"><input type="number" step="0.5" data-i="2" aria-label="Z"></div>
+        <div class="vec" data-v="rot"><span>Поворот, °</span><input type="number" step="5" data-i="0" aria-label="вокруг X"><input type="number" step="5" data-i="1" aria-label="вокруг Y"><input type="number" step="5" data-i="2" aria-label="вокруг Z"></div>
+        <div class="vec" data-v="size"><span>Размер</span><input type="number" step="1" min="1" data-i="0" aria-label="ширина"><input type="number" step="1" min="1" data-i="1" aria-label="высота"><input type="number" step="1" min="0.5" data-i="2" aria-label="глубина"></div>
+        <p class="note" id="sSizeNote"></p>
+        <div id="sParams" class="sparams"></div>
+        <div class="row"><button class="btn primary" id="sApply">Применить в блоки</button><button class="btn" id="sDup">Копия</button><span class="spacer"></span><button class="btn danger" id="sDel">Удалить</button></div>
+        <p class="note keys"><b>Мышь над 3D, как в Blender:</b> <kbd>G</kbd> двигать · <kbd>R</kbd> вращать · <kbd>S</kbd> размер → потом <kbd>X</kbd>/<kbd>Y</kbd>/<kbd>Z</kbd> — по одной оси, <kbd>Shift</kbd> — точнее. Клик или <kbd>Enter</kbd> — готово, <kbd>Esc</kbd> или ПКМ — отмена. <kbd>Shift</kbd>+<kbd>D</kbd> — копия, <kbd>Delete</kbd> — удалить, <kbd>Enter</kbd> без действия — применить. Колесо над числом меняет его.</p>
+      </div>
+      <div class="row" id="shapeAllRow" hidden><button class="btn" id="sApplyAll">Применить все</button><label class="chip"><input type="checkbox" id="sGhost" checked><span class="dot" style="background:var(--accent)"></span>Показывать фигуры</label></div>
     </section>
   </aside>
 </div>
@@ -149,6 +152,7 @@
 <script src="js/common.js"></script>
 <script src="js/temple.js"></script>
 <script src="js/vox.js"></script>
+<script src="js/shapes.js"></script>
 <script src="js/structures.js"></script>
 </body>
 </html>

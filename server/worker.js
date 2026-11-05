@@ -173,7 +173,13 @@ function cleanDefs(list) {
     const edits = Array.isArray(d.edits) ? d.edits.filter(e => Array.isArray(e) && e.length === 4 && e.every(Number.isFinite)).map(e => e.map(v => Math.trunc(v))) : [];
     total += edits.length; if (total > 200000) fail(413, 'Слишком много правок в структурах');
     const sym = d.sym && typeof d.sym === 'object' ? { n: int(d.sym.n || 1, 'Симметрия', 1, 16), mirror: !!d.sym.mirror, axis: d.sym.axis === 'z' ? 'z' : 'x' } : null;
-    return { id: str(d.id, 40, 'id') || String(now()), name: str(d.name, 60, 'Название') || 'Структура', kind: ['temple', 'lotus', 'voxel'].includes(d.kind) ? d.kind : 'box',
+    const v3 = (a, lo, hi, df) => [0, 1, 2].map(i => { const n = Number(Array.isArray(a) ? a[i] : NaN); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : df; });
+    const shapes = (Array.isArray(d.shapes) ? d.shapes : []).slice(0, 200).filter(q => q && typeof q === 'object').map(q => ({
+      id: str(q.id, 20, 'id фигуры') || String(now()), type: ['box', 'sphere', 'cyl', 'cone', 'torus', 'pyramid', 'petal'].includes(q.type) ? q.type : 'box', name: str(q.name, 40, 'Название фигуры'),
+      pos: v3(q.pos, -4096, 4096, 0), rot: v3(q.rot, -3600, 3600, 0), size: v3(q.size, 0.5, 1024, 4),
+      p: Object.fromEntries(['thick', 'taper', 'tube', 'curl', 'tip', 'base', 'peak'].filter(k => q.p && Number.isFinite(Number(q.p[k]))).map(k => [k, Math.min(100, Math.max(-100, Number(q.p[k])))])),
+      block: str(q.block, 160, 'Блок'), mode: q.mode === 'cut' ? 'cut' : 'add', hidden: !!q.hidden }));
+    return { id: str(d.id, 40, 'id') || String(now()), name: str(d.name, 60, 'Название') || 'Структура', kind: ['temple', 'lotus', 'voxel'].includes(d.kind) ? d.kind : 'box', shapes,
       sym, dataV: int(d.dataV || 0, 'Версия модели', 0, 1e15), backupV: int(d.backupV || 0, 'Версия копии', 0, 1e15),
       bw: int(d.bw || 0, 'Ширина модели', 0, 1024), bd: int(d.bd || 0, 'Глубина модели', 0, 1024), vx0: int(d.vx0 || 0, 'Сдвиг X', -1024, 1024), vz0: int(d.vz0 || 0, 'Сдвиг Z', -1024, 1024),
       scale: [0.55, 0.75, 1].includes(Number(d.scale)) ? Number(d.scale) : 1, edits,

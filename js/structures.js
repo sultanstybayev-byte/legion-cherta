@@ -31,7 +31,7 @@
       || '<div class="empty">Структур пока нет.</div>';
   }
   function renderEditor() {
-    const d = defOf(cur); $('editor').hidden = !d; $('toolsSec').hidden = !d || !isModel(d) || !CAN; $('weSec').hidden = !d || !isModel(d) || !CAN;
+    const d = defOf(cur); $('editor').hidden = !d; $('toolsSec').hidden = !d || !isModel(d) || !CAN; $('shapeSec').hidden = !d || !isModel(d) || !CAN;
     if (!d) return;
     const model = isModel(d);
     $('edHead').textContent = d.name; $('dName').value = d.name; $('dColor').value = d.color || '#e07b2a'; $('dNote').value = d.note || '';
@@ -61,7 +61,7 @@
     if (!isModel(d)) { d.w = Math.min(32, Math.max(1, Math.round(+$('dW').value || 1))); d.d = Math.min(32, Math.max(1, Math.round(+$('dD').value || 1))); d.h = Math.min(320, Math.max(1, Math.round(+$('dH').value || 8))); }
     App.save('structdefs'); renderList(); renderEditor(); if (!isModel(d)) loadCurrent(); App.toast('Сохранено');
   };
-  $('dSym').onchange = () => { const d = defOf(cur); if (!d) return; d.sym = SYMS[$('dSym').value] || SYMS.none; App.save('structdefs'); renderList(); App.toast(symOf(d) ? 'Симметрия включена: правки будут повторяться.' : 'Симметрия выключена'); };
+  $('dSym').onchange = () => { const d = defOf(cur); if (!d) return; d.sym = SYMS[$('dSym').value] || SYMS.none; App.save('structdefs'); renderList(); drawGhosts(); App.toast(symOf(d) ? 'Симметрия включена: правки будут повторяться.' : 'Симметрия выключена'); };
   let delArm = 0;
   $('dDel').onclick = () => {
     const d = defOf(cur); if (!d) return; const n = placed(d.id);
@@ -292,7 +292,7 @@
     try { const v = await VX.loadModel(d); if (cur !== d.id) return; vox = v ? v.clone() : null; }
     catch (e) { App.toast('Модель не загрузилась: ' + e.message, 6000); }
     finally { $('busy').hidden = true; }
-    pal.n = -1; rebuild(true); renderEditor(); renderPalette(); setState(''); hud();
+    pal.n = -1; rebuild(true); renderEditor(); renderPalette(); setState(''); hud(); selShape = null; xf = null; shapesChanged(true);
   }
 
   /* ================= changes: symmetry, growth, undo ================= */
@@ -323,7 +323,7 @@
       vox.set(x, y, z, id); rec.push(x, y, z, old, id);
     }
     const n = rec.length / 5; if (!n) { if (grow) rebuild(); return 0; }
-    undoS.push({ label, rec: Int32Array.from(rec) }); if (undoS.length > 60) undoS.shift(); redoS.length = 0;
+    undoS.push({ label, rec: Int32Array.from(rec), shape: opt.shape || null }); if (undoS.length > 60) undoS.shift(); redoS.length = 0;
     refreshAfter(rec, grow); markDirty(); return n;
   }
   function refreshAfter(rec, force) {
@@ -334,11 +334,11 @@
     renderInfo();
   }
   function undo(steps) {
-    let done = 0; for (let s = 0; s < (steps || 1); s++) { const op = undoS.pop(); if (!op) break; const r = op.rec; for (let i = r.length - 5; i >= 0; i -= 5) vox.set(r[i], r[i + 1], r[i + 2], r[i + 3]); redoS.push(op); refreshAfter(r); done++; }
+    let done = 0; for (let s = 0; s < (steps || 1); s++) { const op = undoS.pop(); if (!op) break; const r = op.rec; for (let i = r.length - 5; i >= 0; i -= 5) vox.set(r[i], r[i + 1], r[i + 2], r[i + 3]); if (op.shape) { shapes().push(JSON.parse(JSON.stringify(op.shape))); selShape = op.shape.id; shapesChanged(); } redoS.push(op); refreshAfter(r); done++; }
     if (done) markDirty(); return done;
   }
   function redo(steps) {
-    let done = 0; for (let s = 0; s < (steps || 1); s++) { const op = redoS.pop(); if (!op) break; const r = op.rec; for (let i = 0; i < r.length; i += 5) vox.set(r[i], r[i + 1], r[i + 2], r[i + 4]); undoS.push(op); refreshAfter(r); done++; }
+    let done = 0; for (let s = 0; s < (steps || 1); s++) { const op = redoS.pop(); if (!op) break; const r = op.rec; for (let i = 0; i < r.length; i += 5) vox.set(r[i], r[i + 1], r[i + 2], r[i + 4]); if (op.shape) { removeShape(op.shape.id, true); } undoS.push(op); refreshAfter(r); done++; }
     if (done) markDirty(); return done;
   }
   $('undoBtn').onclick = () => { if (!undo()) App.toast('Нечего отменять', 1500); };
@@ -427,7 +427,8 @@
 
   /* ================= WorldEdit commands ================= */
   const logLines = [];
-  function weLog(t) { logLines.push(t); while (logLines.length > 7) logLines.shift(); $('weLog').textContent = logLines.join('\n'); }
+  let logTimer = 0;
+  function weLog(t, keep) { logLines.push(t); while (logLines.length > (keep ? 20 : 4)) logLines.shift(); $('weLog').textContent = logLines.join('\n'); $('weLog').classList.add('on'); clearTimeout(logTimer); logTimer = setTimeout(() => { $('weLog').classList.remove('on'); logLines.length = 0; }, keep ? 30000 : 9000); }
   const HELP = [
     '//pos1  //pos2 — точки выделения (куда смотришь / где стоишь)', '//desel — снять выделение   //size — размер', '//set <блок> — заполнить (можно: 70%stone,30%andesite)', '//replace [что] <чем> — заменить (без «что» — все блоки)',
     '//walls <блок> — стены   //faces <блок> — коробка   //hollow — пустая внутри', '//overlay <блок> — слой сверху на всём выделенном', '//copy  //cut  //paste — буфер (вставка в точку прицела или точку 1)',
@@ -470,7 +471,7 @@
     const res = m => { weLog('> ' + line + (m ? '\n  ' + m : '')); if (m) App.toast(m, 2500); };
     const did = (n, what) => res(`${what}: ${fmt(n)} бл.${symActive() ? ' (с симметрией)' : ''}`);
     switch (c) {
-      case 'help': case '?': weLog(HELP.join('\n')); $('weLog').scrollTop = 0; logLines.length = 0; HELP.forEach(h => logLines.push(h)); return;
+      case 'help': case '?': logLines.length = 0; weLog(HELP.join('\n'), true); return;
       case 'pos1': case 'hpos1': case 'pos2': case 'hpos2': {
         if (!fp.on) throw new Error('В обзоре точки ставятся мышью: инструмент «Выделение».');
         let p = [Math.floor(fp.x), Math.floor(fp.y), Math.floor(fp.z)];
@@ -556,21 +557,193 @@
     }
   }
   function runSafe(line) { try { if (!vox) throw new Error('Выбери модель из блоков.'); if (!CAN && !/^\/*(help|size|count|pos|hpos|desel|sel)/.test(line.trim())) { deny(); return; } run(line); } catch (e) { weLog('> ' + line + '\n  ' + e.message); App.toast(e.message, 3500); } }
-  // buttons fill the command line when the command needs more input
-  document.querySelectorAll('[data-we]').forEach(b => b.onclick = () => {
-    const c = b.dataset.we, bl = block().replace(/^minecraft:/, ''), ask = { '//replace': `//replace ${bl} air`, '//stack': '//stack 1 me', '//move': '//move 1 me', '//sphere': `//sphere ${bl} 5`, '//cyl': `//cyl ${bl} 5 3`, '//pyramid': `//pyramid ${bl} 6` };
-    if (ask[c]) { $('cmd').value = ask[c]; $('cmd').focus(); $('cmd').setSelectionRange(ask[c].length, ask[c].length); App.toast('Поправь числа и нажми Enter', 2500); return; }
-    runSafe(['//set', '//walls', '//faces', '//line', '//count'].includes(c) && c !== '//count' ? c + ' ' + bl : c);
-  });
+  /* command hints: type // and the matching commands show up; ↑↓ to pick, Tab to complete */
+  const CMDS = [
+    ['//set', '<блок>', 'заполнить выделение; можно смесь 70%stone,30%andesite'], ['//replace', '[что] <чем>', 'заменить в выделении; без «что» — все блоки'],
+    ['//set air', '', 'очистить (удалить) всё в выделении'], ['//walls', '<блок>', 'четыре стены по краям выделения'], ['//faces', '<блок>', 'коробка: стены, пол и потолок'],
+    ['//hollow', '', 'очистить всё внутри, оставив оболочку'], ['//overlay', '<блок>', 'слой поверх всего в выделении'], ['//count', '[блок]', 'посчитать блоки в выделении'],
+    ['//size', '', 'размер выделения'], ['//copy', '', 'копировать выделение'], ['//cut', '', 'вырезать выделение'], ['//paste', '', 'вставить: в точку прицела или в точку 1'],
+    ['//rotate', '90|180|270', 'повернуть буфер по часовой'], ['//flip', '[x|y|z|me]', 'отразить буфер'], ['//stack', '[раз] [куда]', 'повторить выделение вплотную'],
+    ['//move', '[на] [куда]', 'сдвинуть блоки выделения'], ['//expand', '<n> [куда] | vert', 'расширить выделение'], ['//contract', '<n> [куда]', 'сузить выделение'],
+    ['//shift', '<n> [куда]', 'сдвинуть рамку выделения'], ['//pos1', '', 'точка 1 там, где стоишь (внутри)'], ['//pos2', '', 'точка 2 там, где стоишь (внутри)'],
+    ['//hpos1', '', 'точка 1 — блок под прицелом'], ['//hpos2', '', 'точка 2 — блок под прицелом'], ['//desel', '', 'снять выделение'],
+    ['//sphere', '<блок> <радиус>', 'шар в точке 1 / у прицела'], ['//hsphere', '<блок> <радиус>', 'пустой шар'], ['//cyl', '<блок> <радиус> [высота]', 'цилиндр'],
+    ['//hcyl', '<блок> <радиус> [высота]', 'труба'], ['//pyramid', '<блок> <высота>', 'пирамида'], ['//hpyramid', '<блок> <высота>', 'пустая пирамида'],
+    ['//line', '<блок>', 'линия от точки 1 к точке 2'], ['//undo', '[шагов]', 'отменить'], ['//redo', '[шагов]', 'вернуть'], ['//help', '', 'все команды']];
+  let sugIdx = 0, sugList = [];
+  function renderSug() {
+    const v = $('cmd').value, first = v.split(/\s+/)[0].toLowerCase();
+    if (!v.startsWith('/') || v.includes(' ') && CMDS.some(c => c[0] === first) && !v.endsWith(' ')) { /* typing arguments: show the one command */ }
+    sugList = v.startsWith('/') ? CMDS.filter(c => c[0].startsWith(v.includes(' ') ? first : v.toLowerCase()) || (v.includes(' ') && c[0] === first)) : [];
+    if (!sugList.length || document.activeElement !== $('cmd')) { $('cmdSug').hidden = true; return; }
+    sugIdx = Math.min(sugIdx, sugList.length - 1);
+    $('cmdSug').innerHTML = sugList.slice(0, 9).map((c, i) => `<div class="sg${i === sugIdx ? ' on' : ''}" data-i="${i}"><b>${esc(c[0])}</b> <span class="a">${esc(c[1])}</span><span class="d">${esc(c[2])}</span></div>`).join('')
+      + '<div class="sgk">↑↓ — выбрать · Tab — дописать · Enter — выполнить · блок без названия — тот, что в руке</div>';
+    $('cmdSug').hidden = false;
+  }
+  function complete(i) { const c = sugList[i]; if (!c) return; $('cmd').value = c[0] + (c[1] ? ' ' : ''); $('cmd').focus(); sugIdx = 0; renderSug(); }
+  $('cmd').addEventListener('input', () => { sugIdx = 0; renderSug(); });
+  $('cmd').addEventListener('focus', renderSug);
+  $('cmd').addEventListener('blur', () => setTimeout(() => { $('cmdSug').hidden = true; }, 150));
+  $('cmdSug').addEventListener('mousedown', e => { const d = e.target.closest('[data-i]'); if (d) { e.preventDefault(); complete(+d.dataset.i); } });
   let resumeFP = false;
-  $('cmdForm').onsubmit = e => { e.preventDefault(); const v = $('cmd').value; $('cmd').value = ''; runSafe(v); if (resumeFP) { resumeFP = false; lockMouse(); canvas.focus(); } };
-  $('cmd').addEventListener('keydown', e => { if (e.key === 'Escape') { $('cmd').blur(); if (resumeFP) { resumeFP = false; lockMouse(); } } e.stopPropagation(); });
+  $('cmdForm').onsubmit = e => { e.preventDefault(); const v = $('cmd').value; $('cmd').value = ''; $('cmdSug').hidden = true; runSafe(v); if (resumeFP) { resumeFP = false; lockMouse(); canvas.focus(); } };
+  $('cmd').addEventListener('keydown', e => {
+    if (e.key === 'Escape') { $('cmd').blur(); if (resumeFP) { resumeFP = false; lockMouse(); } }
+    else if (!$('cmdSug').hidden && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); sugIdx = (sugIdx + (e.key === 'ArrowDown' ? 1 : -1) + Math.min(9, sugList.length)) % Math.min(9, sugList.length); renderSug(); }
+    else if (e.key === 'Tab' && !$('cmdSug').hidden) { e.preventDefault(); complete(sugIdx); }
+    e.stopPropagation();
+  });
+
+  /* ================= shapes (editable objects, like in Blender) ================= */
+  const shapes = () => { const d = defOf(cur); if (!d) return []; if (!Array.isArray(d.shapes)) d.shapes = []; return d.shapes; };
+  let selShape = null, xf = null, ghost = null, gizmo = null, ghostMap = new Map(), ghostQ = false, shapeSaveT = 0;
+  const mouse = { x: -1, y: -1 };
+  const curShape = () => shapes().find(q => q.id === selShape) || null;
+  const mouseOverStage = () => { const r = canvas.getBoundingClientRect(); return mouse.x >= r.left && mouse.x <= r.right && mouse.y >= r.top && mouse.y <= r.bottom; };
+  const clone = o => JSON.parse(JSON.stringify(o));
+  function saveShapesLater() { clearTimeout(shapeSaveT); shapeSaveT = setTimeout(() => App.save('structdefs'), 1200); }
+  function shapesChanged(noSave) { renderShapes(); drawGhosts(); if (!noSave) saveShapesLater(); }
+  function newPos(type, size) {
+    let b;
+    if (fp.on) { const a = aimCenter(); b = a ? [a.px, a.py, a.pz] : [Math.floor(fp.x), Math.floor(fp.y), Math.floor(fp.z) - 6]; }
+    else if (sel.p1) b = sel.p1.slice(); else b = [Math.round(orbit.tx), 0, Math.round(orbit.tz)];
+    if (type === 'petal') return [b[0] + .5, b[1], b[2] + .5];
+    return [b[0] + (size[0] % 2 ? .5 : 0), b[1] + size[1] / 2, b[2] + (size[2] % 2 ? .5 : 0)];
+  }
+  document.querySelectorAll('[data-add]').forEach(btn => btn.onclick = () => {
+    if (!CAN && deny()) return; if (!vox) return;
+    const t = btn.dataset.add, sh = SH.make(t, [0, 0, 0], block()); sh.pos = newPos(t, sh.size);
+    const same = shapes().filter(q => q.type === t).length; if (same) sh.name += ' ' + (same + 1);
+    shapes().push(sh); selShape = sh.id; shapesChanged();
+    App.toast(`${sh.name}: наведи мышь на 3D и жми G — двигать, R — вращать, S — размер. Enter — в блоки.`, 5000);
+  });
+  function selectShape(id) { selShape = id; xf = null; renderShapes(); drawGhosts(); }
+  function removeShape(id, silent) { const d = defOf(cur); if (!d) return; d.shapes = shapes().filter(q => q.id !== id); if (selShape === id) selShape = null; shapesChanged(); if (!silent) App.toast('Фигура удалена', 1500); }
+  function dupShape() { const s0 = curShape(); if (!s0) return; const c = clone(s0); c.id = Math.random().toString(36).slice(2, 10); c.name = s0.name + ' копия'; c.pos[0] += Math.max(2, Math.round(s0.size[0] * .6)); shapes().push(c); selShape = c.id; shapesChanged(); startXf('G'); }
+  function bakeShape(id) {
+    if (!CAN && deny()) return; const s0 = shapes().find(q => q.id === id); if (!s0) return;
+    const nm = s0.mode === 'cut' ? 'minecraft:air' : (s0.block || block()), cells = SH.cells(s0);
+    const n = apply(cells.map(([x, y, z]) => [x, y, z, nm]), 'фигура «' + s0.name + '»', { shape: clone(s0) });
+    if (!n) { App.toast('Блоки не изменились: фигура пустая или уже такая же.', 3000); return; }
+    removeShape(id, true); App.toast(`«${s0.name}» → ${fmt(n)} бл.${symActive() ? ' с симметрией' : ''}. Ctrl+Z вернёт фигуру.`, 4000);
+  }
+  $('sApply').onclick = () => bakeShape(selShape); $('sDup').onclick = dupShape; $('sDel').onclick = () => removeShape(selShape);
+  $('sApplyAll').onclick = () => { for (const q of shapes().filter(q => !q.hidden).slice()) bakeShape(q.id); };
+  $('sGhost').onchange = drawGhosts;
+  $('sBlock').onclick = () => { const q = curShape(); if (!q) return; q.block = block(); shapesChanged(); };
+  $('sName').oninput = () => { const q = curShape(); if (!q) return; q.name = $('sName').value.slice(0, 40); renderShapeList(); saveShapesLater(); };
+  $('sMode').onchange = () => { const q = curShape(); if (!q) return; q.mode = $('sMode').value; shapesChanged(); };
+  document.querySelectorAll('#shapeEd .vec input').forEach(inp => {
+    inp.addEventListener('input', () => { const q = curShape(); if (!q) return; const v = +inp.value; if (!Number.isFinite(v)) return; const key = inp.parentElement.dataset.v; q[key][+inp.dataset.i] = key === 'size' ? Math.max(0.5, v) : v; drawGhostsSoon(); saveShapesLater(); });
+    inp.addEventListener('wheel', e => { if (document.activeElement !== inp) return; e.preventDefault(); const st = +inp.step || 1; inp.value = String(+(+inp.value + (e.deltaY < 0 ? st : -st)).toFixed(2)); inp.dispatchEvent(new Event('input')); }, { passive: false });
+  });
+  function renderShapeList() {
+    const L = shapes(); $('shapeCount').textContent = L.length ? String(L.length) : ''; $('shapeAllRow').hidden = !L.length;
+    $('shapeList').innerHTML = L.map(q => `<div class="sh${q.id === selShape ? ' on' : ''}" data-sid="${esc(q.id)}"><i style="background:${q.mode === 'cut' ? '#c0392b' : VX.colorOf(q.block || block())}"></i><span class="t">${esc(q.name)}</span><span class="c">${SH.TYPES[q.type].name}${q.mode === 'cut' ? ' · вырезает' : ''}</span>
+      <button class="btn sm" data-eye="${esc(q.id)}" title="Скрыть / показать">${q.hidden ? 'показать' : 'скрыть'}</button></div>`).join('') || '<p class="note">Фигур нет. Добавь кнопкой выше.</p>';
+  }
+  $('shapeList').addEventListener('click', e => {
+    const eye = e.target.closest('[data-eye]'); if (eye) { const q = shapes().find(x => x.id === eye.dataset.eye); if (q) { q.hidden = !q.hidden; shapesChanged(); } return; }
+    const it = e.target.closest('[data-sid]'); if (it) selectShape(it.dataset.sid === selShape ? null : it.dataset.sid);
+  });
+  function renderShapes() {
+    renderShapeList(); const q = curShape(); $('shapeEd').hidden = !q; if (!q) return;
+    if (document.activeElement !== $('sName')) $('sName').value = q.name; $('sMode').value = q.mode || 'add';
+    $('sBlockName').innerHTML = `<i style="background:${VX.colorOf(q.block || block())}"></i>${esc(VX.label(q.block || block()))}`;
+    document.querySelectorAll('#shapeEd .vec').forEach(row => row.querySelectorAll('input').forEach(inp => { if (document.activeElement !== inp) inp.value = String(+(+q[row.dataset.v][+inp.dataset.i]).toFixed(2)); }));
+    $('sSizeNote').textContent = q.type === 'petal' ? 'Размер лепестка: ширина × длина × глубина чаши. Позиция — середина основания; длина растёт по оси Y, наклоняй поворотом.' : 'Размер: ширина (X) × высота (Y) × глубина (Z). Позиция — центр фигуры.';
+    $('sParams').innerHTML = (SH.PARAMS[q.type] || []).map(([k, lab, mn, mx, st]) => `<label class="f">${esc(lab)} <span class="mono" data-pv="${k}">${q.p[k] ?? 0}</span><input type="range" data-pk="${k}" min="${mn}" max="${mx}" step="${st}" value="${q.p[k] ?? 0}"></label>`).join('');
+  }
+  $('sParams').addEventListener('input', e => { const r = e.target.closest('[data-pk]'); const q = curShape(); if (!r || !q) return; q.p[r.dataset.pk] = +r.value; const v = $('sParams').querySelector(`[data-pv="${r.dataset.pk}"]`); if (v) v.textContent = r.value; drawGhostsSoon(); saveShapesLater(); });
+  // translucent preview of every shape (and its symmetric copies); the selected one is highlighted, with axes
+  function drawGhostsSoon() { if (ghostQ) return; ghostQ = true; requestAnimationFrame(() => { ghostQ = false; drawGhosts(); renderShapes(); }); }
+  function drawGhosts() {
+    if (ghost) { scene.remove(ghost); ghost.geometry.dispose(); ghost.material.dispose(); ghost = null; }
+    if (gizmo) { scene.remove(gizmo); gizmo.traverse(x => { if (x.geometry) x.geometry.dispose(); if (x.material) x.material.dispose(); }); gizmo = null; }
+    ghostMap = new Map();
+    if (!vox || !$('sGhost').checked) { redraw(); return; }
+    const list = [], sym = symActive() ? symOf(defOf(cur)) : null, acc = new THREE.Color(css('--accent') || '#e07b2a');
+    for (const q of shapes()) {
+      if (q.hidden) continue; const on = q.id === selShape, base = new THREE.Color(q.mode === 'cut' ? '#e74c3c' : VX.colorOf(q.block || block()));
+      const col = on ? base.clone().lerp(acc, .35) : base, colM = base.clone().lerp(new THREE.Color('#ffffff'), .35);
+      for (const [x, y, z] of SH.cells(q)) {
+        ghostMap.set(x + ',' + y + ',' + z, q.id); list.push(x, y, z, col);
+        if (sym) for (const [a, b] of VX.symImages(x, z, sym).slice(1)) list.push(a, y, b, colM);
+      }
+    }
+    const n = list.length / 4;
+    if (n) {
+      ghost = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: .5, depthWrite: false }), n);
+      for (let i = 0; i < n; i++) { tmpM.makeTranslation(list[4 * i] + .5, list[4 * i + 1] + .5, list[4 * i + 2] + .5); ghost.setMatrixAt(i, tmpM); ghost.setColorAt(i, list[4 * i + 3]); }
+      ghost.renderOrder = 5; scene.add(ghost);
+    }
+    const q = curShape();
+    if (q && !q.hidden) {
+      const g = new THREE.Group(), L = Math.max(...q.size) / 2 + 6, o = new THREE.Vector3(...q.pos), M = SH.rotM(q.rot);
+      [[0xe74c3c, 0], [0x2ecc71, 1], [0x3498db, 2]].forEach(([c, i]) => {
+        const dir = new THREE.Vector3(M[0][i], M[1][i], M[2][i]), long = xf && xf.axis === i, len = long ? 400 : L;
+        const gg = new THREE.BufferGeometry().setFromPoints([o.clone().addScaledVector(dir, long ? -len : 0), o.clone().addScaledVector(dir, len)]);
+        const ln = new THREE.Line(gg, new THREE.LineBasicMaterial({ color: c, depthTest: false })); ln.renderOrder = 10; g.add(ln);
+      });
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false })); dot.position.copy(o); dot.renderOrder = 11; g.add(dot);
+      gizmo = g; scene.add(g);
+    }
+    redraw();
+  }
+  function ghostAt(cx, cy) {
+    if (!ghostMap.size) return null;
+    const r = canvas.getBoundingClientRect(); camera.updateMatrixWorld();
+    const v = new THREE.Vector3(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1, 0.5).unproject(camera), o = camera.position.clone(), d = v.sub(o).normalize();
+    let x = Math.floor(o.x), y = Math.floor(o.y), z = Math.floor(o.z); const D = [d.x, d.y, d.z], O = [o.x, o.y, o.z], st = D.map(q => q > 0 ? 1 : -1), td = D.map(q => Math.abs(1 / (q || 1e-12)));
+    const t = [0, 1, 2].map(i => (D[i] > 0 ? (Math.floor(O[i]) + 1 - O[i]) : (O[i] - Math.floor(O[i]))) * td[i]);
+    for (let i = 0; i < 8000; i++) {
+      const id = ghostMap.get(x + ',' + y + ',' + z); if (id) return id;
+      if (vox && vox.get(x, y, z)) return null; if (y < -1) return null;
+      if (t[0] < t[1] && t[0] < t[2]) { x += st[0]; t[0] += td[0]; } else if (t[1] < t[2]) { y += st[1]; t[1] += td[1]; } else { z += st[2]; t[2] += td[2]; }
+    }
+    return null;
+  }
+  // G / R / S with the mouse, like Blender; X / Y / Z lock an axis
+  const toScreen = v => { const p = v.clone().project(camera), r = canvas.getBoundingClientRect(); return [(p.x + 1) / 2 * r.width, (1 - p.y) / 2 * r.height]; };
+  function startXf(kind) {
+    const q = curShape(); if (!q || (!CAN && deny())) return;
+    xf = { kind, axis: kind === 'R' ? 1 : null, start: clone(q), mx: mouse.x, my: mouse.y, shift: false };
+    weLog({ G: 'Двигаешь', R: 'Вращаешь', S: 'Меняешь размер' }[kind] + ' «' + q.name + '»: веди мышь · X/Y/Z — ось · клик/Enter — готово · Esc/ПКМ — отмена'); drawGhosts();
+  }
+  function updateXf(e) {
+    const q = curShape(); if (!q || !xf) return; if (e) xf.shift = e.shiftKey;
+    const dx = mouse.x - xf.mx, dy = mouse.y - xf.my, s0 = xf.start, fine = xf.shift;
+    Object.assign(q, clone(s0));
+    if (xf.kind === 'G') {
+      const O = new THREE.Vector3(...s0.pos);
+      if (xf.axis == null) {
+        camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), dist = camera.position.distanceTo(O), upp = 2 * dist * Math.tan(camera.fov * Math.PI / 360) / r.height;
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0), up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+        const dv = right.multiplyScalar(dx * upp).add(up.multiplyScalar(-dy * upp)); const st = fine ? 0.1 : 1;
+        q.pos = [0, 1, 2].map(i => +(s0.pos[i] + Math.round(dv.getComponent(i) / st) * st).toFixed(2));
+      } else {
+        const ax = [0, 0, 0]; ax[xf.axis] = 1; const a = toScreen(O), b = toScreen(O.clone().add(new THREE.Vector3(...ax))), dp = [b[0] - a[0], b[1] - a[1]], L2 = dp[0] * dp[0] + dp[1] * dp[1] || 1;
+        const amt = (dx * dp[0] + dy * dp[1]) / L2, st = fine ? 0.1 : 1; q.pos[xf.axis] = +(s0.pos[xf.axis] + Math.round(amt / st) * st).toFixed(2);
+      }
+    } else if (xf.kind === 'R') {
+      const st = fine ? 1 : 5, ang = Math.round(dx * 0.5 / st) * st; q.rot[xf.axis ?? 1] = s0.rot[xf.axis ?? 1] + ang;
+    } else {
+      const f = Math.max(0.05, 1 + dx * 0.006), st = fine ? 0.5 : 1;
+      for (let i = 0; i < 3; i++) if (xf.axis == null || xf.axis === i) q.size[i] = Math.max(0.5, Math.round(s0.size[i] * f / st) * st);
+    }
+    $('weLog').textContent = `${{ G: 'Позиция', R: 'Поворот', S: 'Размер' }[xf.kind]}${xf.axis != null ? ' по ' + 'XYZ'[xf.axis] : ''}: ${(xf.kind === 'G' ? q.pos : xf.kind === 'R' ? q.rot : q.size).map(v => +(+v).toFixed(1)).join(' · ')}`;
+    drawGhostsSoon();
+  }
+  function confirmXf() { if (!xf) return; xf = null; drawGhosts(); renderShapes(); saveShapesLater(); }
+  function cancelXf() { const q = curShape(); if (xf && q) Object.assign(q, clone(xf.start)); xf = null; drawGhosts(); renderShapes(); }
 
   /* ================= input ================= */
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   let drag = null, stroke = null, hoverQ = false;
   canvas.addEventListener('pointerdown', e => {
     canvas.focus({ preventScroll: true });
+    if (xf) { e.preventDefault(); if (e.button === 2) cancelXf(); else confirmXf(); return; }
     if (fp.on) {
       if (document.pointerLockElement !== canvas) { lockMouse(); return; }
       const a = aimCenter(); useTool(a, e.button);
@@ -582,6 +755,8 @@
     if (drag.paint) { const a = aimMouse(e.clientX, e.clientY); drag.lastKey = a ? a.x + ',' + a.y + ',' + a.z : ''; useTool(a, 0); }
   });
   canvas.addEventListener('pointermove', e => {
+    mouse.x = e.clientX; mouse.y = e.clientY;
+    if (xf) { updateXf(e); return; }
     if (fp.on) return;
     if (!drag) { if (vox && !hoverQ) { hoverQ = true; const x = e.clientX, y = e.clientY; requestAnimationFrame(() => { hoverQ = false; if (drag || fp.on) return; const a = aimMouse(x, y); if (CAN) showAim(a); hoverInfo(a); redraw(); }); } return; }
     if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true;
@@ -592,7 +767,10 @@
   const up = e => {
     if (stroke) { clearInterval(stroke.timer); stroke = null; }
     if (!drag) return; const d = drag; drag = null;
-    if (!d.moved && !d.paint && vox) useTool(aimMouse(e.clientX, e.clientY), d.b);
+    if (!d.moved && !d.paint && vox) {
+      if (d.b === 0 || d.b === 2) { const g = ghostAt(e.clientX, e.clientY); if (g) { selectShape(g); return; } }
+      useTool(aimMouse(e.clientX, e.clientY), d.b);
+    }
   };
   canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', () => { drag = null; });
   window.addEventListener('pointerup', () => { if (stroke) { clearInterval(stroke.timer); stroke = null; } });
@@ -605,6 +783,14 @@
   const typing = () => { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'); };
   document.addEventListener('keydown', e => {
     if (typing()) return;
+    if (xf) { e.preventDefault(); if (e.code === 'Escape') cancelXf(); else if (e.code === 'Enter' || e.code === 'NumpadEnter') confirmXf(); else if (['KeyX', 'KeyY', 'KeyZ'].includes(e.code)) { const a = 'XYZ'.indexOf(e.code[3]); xf.axis = xf.axis === a ? null : a; updateXf(null); } return; }
+    if (!fp.on && curShape() && mouseOverStage()) {
+      if (e.code === 'KeyG' || e.code === 'KeyR' || e.code === 'KeyS') { e.preventDefault(); startXf(e.code[3]); return; }
+      if (e.code === 'KeyD' && e.shiftKey) { e.preventDefault(); dupShape(); return; }
+      if (e.code === 'Delete') { e.preventDefault(); removeShape(selShape); return; }
+      if (e.code === 'Enter') { e.preventDefault(); bakeShape(selShape); return; }
+      if (e.code === 'Escape') { selectShape(null); return; }
+    }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') { e.preventDefault(); redo(); return; }
     if (/^Digit[1-9]$/.test(e.code)) { slot = +e.code.slice(5) - 1; renderHotbar(); return; }
@@ -684,10 +870,10 @@
 
   /* ================= start ================= */
   setTool('block'); renderHotbar(); helpText();
+  $('symOn').addEventListener('change', () => drawGhosts());
   $('surfOn').checked = App.pref('struct.surfGrid', true);
   $('surfOn').onchange = e => { App.setPref('struct.surfGrid', e.target.checked); drawSurfGrid(); };
-  if (location.hash === '#test') Object.assign(App, { _ed: { fp, orbit, run: runSafe, get vox() { return vox; }, sel, apply, undo, redo, aimCenter, useTool, setTool, brush, saveNow, get dirty() { return dirty; }, select } });
+  if (location.hash === '#test') Object.assign(App, { _ed: { fp, orbit, run: runSafe, get vox() { return vox; }, sel, apply, undo, redo, aimCenter, useTool, setTool, brush, saveNow, shapes, bakeShape, startXf, confirmXf, get selShape() { return selShape; }, mouse, updateXf, get dirty() { return dirty; }, select } });
   resize(); renderList();
   const first = defs().find(d => isModel(d)) || defs()[0]; if (first) await select(first.id); else renderEditor();
-  weLog('Подсказка: //help — все команды WorldEdit.');
 })();
