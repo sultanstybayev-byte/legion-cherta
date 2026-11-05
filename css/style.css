@@ -27,7 +27,9 @@ a{color:var(--accent)}
 
 /* ---------- left column ---------- */
 .nav{background:var(--nav);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;height:100vh;padding-top:env(safe-area-inset-top,0px);padding-left:env(safe-area-inset-left,0px)}
-.brand{display:block;font:700 21px/1.1 var(--display);letter-spacing:-.01em;color:var(--fg);text-decoration:none;padding:20px 20px 14px}
+.nav-top{display:flex;align-items:center;gap:8px;padding:18px 14px 14px 20px}
+.brand{display:block;flex:1;min-width:0;font:700 21px/1.1 var(--display);letter-spacing:-.01em;color:var(--fg);text-decoration:none}
+.theme-btn{gap:6px;flex:none}
 .brand span{color:var(--accent)}
 .nav-user{padding:0 16px 14px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid var(--line)}
 .nav-user .note{margin:0}
@@ -66,7 +68,8 @@ a{color:var(--accent)}
 .cdel{position:absolute;top:4px;right:8px;border:1px solid var(--line);background:var(--bg);color:var(--danger);border-radius:6px;font-size:12.5px;padding:0 6px;cursor:pointer;opacity:0}
 .cmsg:hover .cdel,.cdel:focus-visible,.cdel[data-arm="1"]{opacity:1}
 .chat-input{border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:6px}
-.chat-input textarea{min-height:40px;max-height:140px;resize:none;flex:1;font-size:15px}
+.chat-input textarea{min-height:40px;max-height:140px;resize:none;flex:1;font-size:15px;overflow:hidden}
+.chat-h{margin:0;padding:12px 16px 4px;font:600 15px var(--display)}
 .chat-input .note{margin:0}
 .pad-s{padding:8px 14px;margin:0}
 

@@ -212,10 +212,14 @@
     forum: '<path d="M4 5h16v10.5H9.5L5.5 19v-3.5H4z"/><path d="M8 9h8M8 12h5"/>',
     users: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3.3 2.8-5 5.5-5s4.9 1.7 5.5 5"/><circle cx="16.8" cy="9.5" r="2.4"/><path d="M15.5 14.2c2.6.1 4.3 1.6 4.9 4.6"/>',
     clip: '<path d="M20 11.5 12.2 19.3a5 5 0 0 1-7-7l8.1-8.2a3.4 3.4 0 0 1 4.8 4.8l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4"/>',
-    send: '<path d="M4 12 20 4l-4 16-4.5-6.5z"/><path d="M11.5 13.5 20 4"/>'
+    send: '<path d="M4 12 20 4l-4 16-4.5-6.5z"/><path d="M11.5 13.5 20 4"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/>',
+    moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>'
   };
   const svg = (n, s) => `<svg viewBox="0 0 24 24" width="${s || 20}" height="${s || 20}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
   App.icon = svg;
+  App.theme = () => document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  App.setTheme = t => { document.documentElement.dataset.theme = t; write('mcmap.theme', t); try { localStorage.setItem('mcmap.theme', t); } catch (e) { } window.dispatchEvent(new Event('themechange')); };
   App.mountShell = function (active) {
     const main = document.createElement('div'); main.className = 'main';
     [...document.body.children].forEach(el => { if (el.tagName !== 'SCRIPT' && el.tagName !== 'DIALOG') main.appendChild(el); });
@@ -224,7 +228,7 @@
     if (App.mode === 'server' && App.can('seeUsers')) links.push(['users', 'users.html', 'Участники']);
     const shown = App.mode === 'server' ? links : links.slice(0, 3);
     nav.innerHTML = `
-      <a class="brand" href="index.html" id="brandName"></a>
+      <div class="nav-top"><a class="brand" href="index.html" id="brandName"></a><button class="btn sm theme-btn" id="themeBtn"></button></div>
       <div class="nav-user" id="navUser"></div>
       <nav class="nav-links">${shown.map(([k, h, n]) => `<a href="${h}" ${active === k ? 'aria-current="page"' : ''}>${svg(k)}<span>${n}</span></a>`).join('')}</nav>
       <div class="status" id="saveStatus" hidden aria-live="polite"></div>
@@ -233,6 +237,9 @@
     document.body.classList.add('shell');
     const nm = () => { const n = (App.world && App.world.name) || App.meta.name || 'Мир'; const i = n.lastIndexOf(' '); $('brandName').innerHTML = i > 0 ? esc(n.slice(0, i)) + ' <span>' + esc(n.slice(i + 1)) + '</span>' : '<span>' + esc(n) + '</span>'; document.title = ((links.find(t => t[0] === active) || [, , ''])[2] || 'Главная') + ' · ' + n; };
     nm(); App.onChange(nm);
+    const syncTheme = () => { const dark = App.theme() === 'dark'; $('themeBtn').innerHTML = dark ? `${svg('sun', 17)}<span>Светлая</span>` : `${svg('moon', 17)}<span>Тёмная</span>`; $('themeBtn').title = dark ? 'Включить светлую тему' : 'Включить тёмную тему'; };
+    $('themeBtn').onclick = () => { App.setTheme(App.theme() === 'dark' ? 'light' : 'dark'); syncTheme(); };
+    syncTheme();
     const box = $('navUser');
     if (App.mode === 'local') {
       box.innerHTML = `<div class="row"><button class="btn primary grow" id="ghPush">Сохранить на GitHub</button><button class="btn" id="openSettings">Настройки</button></div>`;
@@ -322,13 +329,9 @@
   /* ---------- chat in the menu column ---------- */
   function mountChat(el) {
     if (App.mode !== 'server') { el.innerHTML = '<p class="note pad-s">Чат заработает, когда подключён сервер.</p>'; return; }
-    const CH = [['talk', 'Общий', 'Разговоры легиона'], ['hot', 'Стройка', 'Что сейчас делается на базе']];
-    let ch = read('mcmap.chatChannel', 'talk'); if (!CH.some(c => c[0] === ch)) ch = 'talk';
-    const seen = read('mcmap.chatSeen', { talk: 0, hot: 0 });
     let msgs = [], lastId = 0, loaded = false;
     const mod = App.can('moderate'), me = App.user ? App.user.id : null;
-    el.innerHTML = `<div class="chat-tabs" role="tablist">${CH.map(([k, n]) => `<button role="tab" data-ch="${k}">${n}<i class="dot" hidden></i></button>`).join('')}</div>
-      <p class="chat-sub" id="chatSub"></p>
+    el.innerHTML = `<h2 class="chat-h">Чат легиона</h2>
       <div class="chat-feed" id="chatFeed" aria-live="polite"><p class="note pad-s">Загружаю…</p></div>
       <div class="chat-input" id="chatInput"></div>`;
     const feed = $('chatFeed'), input = $('chatInput');
@@ -336,12 +339,12 @@
       input.innerHTML = `<div class="attach-h"></div><div class="row nowrap"><textarea id="chatMsg" rows="1" maxlength="1000" placeholder="Сообщение…" aria-label="Сообщение"></textarea>
         <button class="btn icon" id="chatClip" title="Прикрепить картинку" aria-label="Прикрепить картинку">${svg('clip', 18)}</button><button class="btn primary icon" id="chatSend" title="Отправить" aria-label="Отправить">${svg('send', 18)}</button></div>`;
       const ta = $('chatMsg'), att = App.attach(input.querySelector('.attach-h'), ta, { zone: el });
-      const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(140, ta.scrollHeight) + 'px'; };
+      const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(140, ta.scrollHeight) + 'px'; ta.style.overflowY = ta.scrollHeight > 140 ? 'auto' : 'hidden'; };
       ta.addEventListener('input', grow);
       $('chatClip').onclick = () => att.pick();
       const send = async () => {
         const t = ta.value.trim(); if (!t && !att.count()) return; $('chatSend').disabled = true;
-        try { const images = await att.ids(); await App.api('POST', '/api/chat', { body: t, channel: ch, images }); ta.value = ''; grow(); att.clear(); await poll(); feed.scrollTop = feed.scrollHeight; }
+        try { const images = await att.ids(); await App.api('POST', '/api/chat', { body: t, channel: 'talk', images }); ta.value = ''; grow(); att.clear(); await poll(); feed.scrollTop = feed.scrollHeight; }
         catch (e) { App.toast(e.message, 4000); } finally { $('chatSend').disabled = false; ta.focus(); }
       };
       $('chatSend').onclick = send;
@@ -349,12 +352,9 @@
     } else if (!App.user) input.innerHTML = '<p class="note">Писать в чат могут участники легиона. <a href="#" id="chatLogin">Войти</a></p>';
     else input.innerHTML = `<p class="note">${App.user.banned ? 'Аккаунт заблокирован.' : 'Писать в чат могут участники. <a href="forum.html#new-apply">Подать заявление</a>'}</p>`;
     if ($('chatLogin')) $('chatLogin').onclick = e => { e.preventDefault(); openLogin(); };
-    el.querySelector('.chat-tabs').onclick = e => { const b = e.target.closest('[data-ch]'); if (!b) return; ch = b.dataset.ch; write('mcmap.chatChannel', ch); render(true); };
     const day = t => new Date(t).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
     function render(jump) {
-      el.querySelectorAll('[data-ch]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.ch === ch)));
-      $('chatSub').textContent = CH.find(c => c[0] === ch)[2];
-      const list = msgs.filter(m => (m.channel || 'hot') === ch);
+      const list = msgs;
       const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
       if (!list.length) feed.innerHTML = `<p class="note pad-s">${loaded ? 'Сообщений пока нет.' : 'Загружаю…'}</p>`;
       else {
@@ -371,8 +371,6 @@
         feed.innerHTML = out;
       }
       if (jump || atBottom) feed.scrollTop = feed.scrollHeight;
-      if (list.length) { seen[ch] = list[list.length - 1].id; write('mcmap.chatSeen', seen); }
-      for (const [k] of CH) { const other = msgs.filter(m => (m.channel || 'hot') === k && m.id > (seen[k] || 0) && m.author !== me).length; el.querySelector(`[data-ch="${k}"] .dot`).hidden = !(k !== ch && other); }
     }
     feed.addEventListener('click', async e => {
       const d = e.target.closest('[data-del]'); if (!d) return;
