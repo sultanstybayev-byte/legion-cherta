@@ -247,7 +247,18 @@
     const P = W().plan, pl = P.platform, acc = css('--accent') || '#e07b2a';
     const rect = (x0, z0, x1, z1, o) => L.rectangle([ll(x0, z0), ll(x1, z1)], Object.assign({ renderer: rend, pane: 'plan' }, o)).addTo(planLayer);
     rect(pl.cx0 * 16, pl.cz0 * 16, (pl.cx0 + pl.size) * 16, (pl.cz0 + pl.size) * 16, { color: acc, weight: 2, dashArray: '6 6', fill: false, interactive: false });
-    for (const t of P.tasks) for (const [cx, cz] of t.chunks) rect(cx * 16, cz * 16, cx * 16 + 16, cz * 16 + 16, { color: t.color, weight: 1, fillColor: t.color, fillOpacity: .35 }).bindTooltip(`<b>${esc(t.name)}</b><br>чанк ${sgn(cx)}, ${sgn(cz)}`, { className: 'chunk-tip', sticky: true });
+    for (const t of P.tasks) {
+      const own = new Set(t.chunks.map(c => c[0] + ',' + c[1])), segs = [];
+      for (const [cx, cz] of t.chunks) {
+        rect(cx * 16, cz * 16, cx * 16 + 16, cz * 16 + 16, { stroke: false, fillColor: t.color, fillOpacity: .3 }).bindTooltip(`<b>${esc(t.name)}</b> · ${t.chunks.length} чанк.${t.note ? '<br>' + esc(t.note) : ''}<br>чанк ${sgn(cx)}, ${sgn(cz)}`, { className: 'chunk-tip', sticky: true });
+        const x = cx * 16, z = cz * 16;
+        if (!own.has(cx + ',' + (cz - 1))) segs.push([ll(x, z), ll(x + 16, z)]);
+        if (!own.has(cx + ',' + (cz + 1))) segs.push([ll(x, z + 16), ll(x + 16, z + 16)]);
+        if (!own.has((cx - 1) + ',' + cz)) segs.push([ll(x, z), ll(x, z + 16)]);
+        if (!own.has((cx + 1) + ',' + cz)) segs.push([ll(x + 16, z), ll(x + 16, z + 16)]);
+      }
+      if (segs.length) L.polyline(segs, { renderer: rend, pane: 'plan', color: t.color, weight: 2.5, dashArray: '6 5', interactive: false }).addTo(planLayer);
+    }
     if (P.base.placed) {
       const N = App.BASE_N[String(P.base.scale)] || 73, cx = P.base.cx * 16 + 8, cz = P.base.cz * 16 + 8;
       rect(cx - N, cz - N, cx + N + 1, cz + N + 1, { color: acc, weight: 2, fillColor: acc, fillOpacity: .12 }).bindTooltip(`<b>Лотос Легиона</b><br>центр X ${sgn(cx)}, Z ${sgn(cz)}`, { className: 'chunk-tip', sticky: true });

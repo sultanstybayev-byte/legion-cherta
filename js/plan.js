@@ -39,7 +39,8 @@
   new ResizeObserver(resize).observe($('stage'));
 
   /* ---------- ground: one thin box per chunk ---------- */
-  let ground = null, lines = null, selLines = null, volume = null; const labels = [];
+  let ground = null, lines = null, selLines = null, volume = null, taskLines = null; const labels = [];
+  let rectMode = false, rect = null;
   const taskOf = new Map();          // "cx,cz" -> task
   function indexTasks() { taskOf.clear(); for (const t of P().tasks) for (const [cx, cz] of t.chunks) taskOf.set(key(cx, cz), t); }
   function buildGround() {
@@ -60,7 +61,7 @@
     const pl = P().platform, n = pl.size, a = new THREE.Color(css('--panel') || '#f7f8f9'), b = new THREE.Color(css('--line') || '#cfd5d9'), acc = new THREE.Color(css('--accent') || '#e07b2a');
     for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
       const cx = pl.cx0 + i, cz = pl.cz0 + j, t = taskOf.get(key(cx, cz));
-      if (t) tmpC.set(t.color); else tmpC.copy(((cx + cz) & 1) ? b : a);
+      if (t) tmpC.copy(((cx + cz) & 1) ? b : a).lerp(new THREE.Color(t.color), 0.42); else tmpC.copy(((cx + cz) & 1) ? b : a);
       if (sel.has(key(cx, cz))) tmpC.lerp(acc, t ? .35 : .55);
       ground.setColorAt(i * n + j, tmpC);
     }
@@ -77,7 +78,30 @@
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
       selLines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: acc, depthTest: false })); selLines.renderOrder = 5; scene.add(selLines);
     }
-    buildVolume(); buildLabels(); redraw();
+    buildTaskLines(); buildVolume(); buildLabels(); redraw();
+  }
+  // dashed outline around each task's area, in the task's colour (inner borders between its own chunks are skipped)
+  function buildTaskLines() {
+    if (taskLines) { scene.remove(taskLines); taskLines.geometry.dispose(); taskLines.material.dispose(); taskLines = null; }
+    const dashes = [];   // [x, y, z, horizontal?, colour]
+    const ys = $('volume').checked ? [0.2, 8.1] : [0.2];
+    const D = 2.6, G = 1.4, I = 0.7;                      // dash, gap, inset from the chunk border
+    for (const t of P().tasks) {
+      const own = new Set(t.chunks.map(c => key(c[0], c[1])));
+      const edge = (x0, z0, horiz, y) => { for (let s = 0.6; s + D <= 16; s += D + G) dashes.push(horiz ? [x0 + s + D / 2, y, z0, 1, t.color] : [x0, y, z0 + s + D / 2, 0, t.color]); };
+      for (const y of ys) for (const [cx, cz] of t.chunks) {
+        const x = cx * 16, z = cz * 16;
+        if (!own.has(key(cx, cz - 1))) edge(x, z + I, 1, y);
+        if (!own.has(key(cx, cz + 1))) edge(x, z + 16 - I, 1, y);
+        if (!own.has(key(cx - 1, cz))) edge(x + I, z, 0, y);
+        if (!own.has(key(cx + 1, cz))) edge(x + 16 - I, z, 0, y);
+      }
+    }
+    if (!dashes.length) return;
+    taskLines = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.12, 1), new THREE.MeshBasicMaterial({ color: 0xffffff }), dashes.length);
+    const q = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
+    dashes.forEach(([x, y, z, h, col], i) => { ps.set(x, y, z); sc.set(h ? D : 0.75, 1, h ? 0.75 : D); tmpM.compose(ps, q, sc); taskLines.setMatrixAt(i, tmpM); taskLines.setColorAt(i, tmpC.set(col)); });
+    taskLines.renderOrder = 4; scene.add(taskLines);
   }
   function buildVolume() {
     if (volume) { scene.remove(volume); volume.geometry.dispose(); volume = null; }
@@ -163,21 +187,37 @@
   canvas.addEventListener('pointerdown', e => {
     canvas.focus({ preventScroll: true });
     if (e.pointerType === 'touch') { touches.set(e.pointerId, [e.clientX, e.clientY]); if (touches.size === 2) { const [a, b] = [...touches.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); } }
-    canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, id: e.pointerId, t: Date.now(), moved: false, shift: e.shiftKey || e.ctrlKey || e.metaKey }; canvas.style.cursor = 'grabbing';
+    canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, id: e.pointerId, t: Date.now(), moved: false, shift: e.shiftKey || e.ctrlKey || e.metaKey }; canvas.style.cursor = rectMode ? 'crosshair' : 'grabbing';
+    if (rectMode && e.button === 0 && e.pointerType !== 'touch' || rectMode && e.pointerType === 'touch' && touches.size === 1) { const c = chunkAt(e.clientX, e.clientY); if (c) rect = { a: c, keep: drag.shift ? new Set(sel) : new Set() }; }
   });
   canvas.addEventListener('pointermove', e => {
     if (touches.has(e.pointerId)) { touches.set(e.pointerId, [e.clientX, e.clientY]); if (pinch != null && touches.size === 2) { const [a, b] = [...touches.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); move(0, 0, 0, (d - pinch) * .5); pinch = d; if (drag) drag.moved = true; return; } }
     if (!drag || drag.id !== e.pointerId) return;
     if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 5) drag.moved = true;
+    if (rect) { if (drag.moved) { const c = chunkAt(e.clientX, e.clientY); if (c) applyRect(c); } drag.x = e.clientX; drag.y = e.clientY; return; }
     if (drag.moved) look(e.clientX - drag.x, e.clientY - drag.y); drag.x = e.clientX; drag.y = e.clientY;
   });
   const up = e => {
     touches.delete(e.pointerId); if (touches.size < 2) pinch = null;
     if (!drag || drag.id !== e.pointerId) return;
-    const d = drag; drag = null; canvas.style.cursor = 'grab';
+    const d = drag; drag = null; canvas.style.cursor = rectMode ? 'crosshair' : 'grab';
+    const wasRect = rect && d.moved; rect = null;
+    if (wasRect) { renderSel(); return; }
     if (!d.moved && Date.now() - d.t < 600 && e.button !== 2) pickAt(e.clientX, e.clientY, d.shift);
   };
   canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', e => { touches.delete(e.pointerId); drag = null; pinch = null; });
+  canvas.addEventListener('dblclick', e => {   // double click selects the whole task under the cursor
+    const c = chunkAt(e.clientX, e.clientY); if (!c) return; const t = taskOf.get(key(c[0], c[1])); if (!t) return;
+    if (!e.shiftKey) sel.clear(); for (const [cx, cz] of t.chunks) sel.add(key(cx, cz)); colorGround(); renderSel();
+  });
+  function applyRect(c) {
+    const pl = P().platform, [ax, az] = rect.a;
+    sel.clear(); for (const k of rect.keep) sel.add(k);
+    for (let x = Math.min(ax, c[0]); x <= Math.max(ax, c[0]); x++) for (let z = Math.min(az, c[1]); z <= Math.max(az, c[1]); z++)
+      if (x >= pl.cx0 && z >= pl.cz0 && x < pl.cx0 + pl.size && z < pl.cz0 + pl.size) sel.add(key(x, z));
+    colorGround(); $('selCount').textContent = String(sel.size);
+  }
+  $('rectBtn').onclick = () => { rectMode = !rectMode; $('rectBtn').setAttribute('aria-pressed', String(rectMode)); canvas.style.cursor = rectMode ? 'crosshair' : 'grab'; App.toast(rectMode ? 'Тяни мышью по платформе, чтобы выделить прямоугольник чанков. Shift — добавить к выбранным.' : 'Выделение рамкой выключено', 3500); };
   canvas.addEventListener('wheel', e => { e.preventDefault(); move(0, 0, 0, -e.deltaY * 0.12); }, { passive: false });
 
   const keys = new Set(); let kbRaf = 0, kbLast = 0;
@@ -200,6 +240,13 @@
   }
 
   /* picking: walk the ray through base voxels, fall back to the ground plane */
+  function chunkAt(clientX, clientY) {
+    const r = canvas.getBoundingClientRect(); camera.updateMatrixWorld();
+    const v = new THREE.Vector3(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1, 0.5).unproject(camera);
+    const o = camera.position.clone(), d = v.sub(o).normalize();
+    if (d.y > -1e-4) return null; const t = -o.y / d.y;
+    return [App.chunkOf(Math.floor(o.x + d.x * t)), App.chunkOf(Math.floor(o.z + d.z * t))];
+  }
   function pickAt(clientX, clientY, add) {
     const r = canvas.getBoundingClientRect(); camera.updateMatrixWorld();
     const v = new THREE.Vector3(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1, 0.5).unproject(camera);
@@ -231,30 +278,36 @@
   $('swatches').onclick = e => { const c = e.target.dataset.c; if (c) { pickColor = c; $('taskColor').value = c; syncSw(); } };
   $('taskColor').oninput = e => { pickColor = e.target.value; syncSw(); };
   const syncSw = () => $('swatches').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.c.toLowerCase() === pickColor.toLowerCase())));
+  let selMode = 'same';
   function selChunks() { return [...sel].map(k => k.split(',').map(Number)); }
   function renderSel() {
     const cs = selChunks();
     $('selCount').textContent = cs.length ? `${cs.length}` : '';
     $('selEdit').hidden = !cs.length || !CAN;
-    if (!cs.length) { $('selInfo').textContent = 'Кликни по чанку на платформе. Shift+клик добавляет ещё чанки.'; return; }
+    if (!cs.length) { $('selInfo').textContent = 'Кликни по чанку. Shift+клик — добавить ещё, «Выделить рамкой» — сразу прямоугольник, двойной клик — вся задача.'; return; }
     const xs = cs.map(c => c[0]), zs = cs.map(c => c[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
     $('selInfo').innerHTML = cs.length === 1
       ? `Чанк <b class="mono">${sgn(x0)}, ${sgn(z0)}</b>: блоки X <span class="mono">${sgn(x0 * 16)}…${sgn(x0 * 16 + 15)}</span>, Z <span class="mono">${sgn(z0 * 16)}…${sgn(z0 * 16 + 15)}</span>`
       : `${cs.length} чанков в области X <span class="mono">${sgn(x0 * 16)}…${sgn(x1 * 16 + 15)}</span>, Z <span class="mono">${sgn(z0 * 16)}…${sgn(z1 * 16 + 15)}</span>`;
     if (!CAN) { const ts0 = [...new Set(cs.map(c => taskOf.get(key(c[0], c[1]))).filter(Boolean))]; $('selInfo').innerHTML += ts0.length ? '<br>' + ts0.map(t => `<b>${esc(t.name)}</b>${t.note ? ': ' + esc(t.note) : ''}`).join('<br>') : '<br>Задачи нет.'; return; }
     const ts = new Set(cs.map(c => taskOf.get(key(c[0], c[1])) || null));
-    const same = ts.size === 1 ? [...ts][0] : null;
-    $('taskPick').innerHTML = '<option value="">Новая задача</option>' + P().tasks.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
-    $('taskPick').value = same ? same.id : '';
+    const real = [...ts].filter(Boolean), free = cs.filter(c => !taskOf.get(key(c[0], c[1]))).length;
+    // pick the task that already holds most of the selected chunks: adding chunks extends it, several tasks merge into it
+    let best = null, bn = 0; for (const t of real) { const n = cs.filter(c => taskOf.get(key(c[0], c[1])) === t).length; if (n > bn) { bn = n; best = t; } }
+    $('taskPick').innerHTML = '<option value="">Новая задача</option>' + P().tasks.map(t => `<option value="${t.id}">${esc(t.name)} (${t.chunks.length} чанк.)</option>`).join('');
+    $('taskPick').value = best ? best.id : '';
+    selMode = real.length > 1 ? 'merge' : (real.length === 1 && free ? 'extend' : 'same');
     fillTaskFields();
-    $('unassignBtn').hidden = ![...ts].some(Boolean);
+    $('unassignBtn').hidden = !real.length;
+    if (real.length > 1) $('selInfo').innerHTML += `<br>В выборе ${real.length} задачи: ${real.map(t => `<b style="color:${t.color}">${esc(t.name)}</b>`).join(', ')}. Выбери, в какую их объединить.`;
+    else if (real.length === 1 && free) $('selInfo').innerHTML += `<br>${free} свободн. чанк. можно добавить к задаче <b style="color:${real[0].color}">${esc(real[0].name)}</b>.`;
   }
   function fillTaskFields() {
     const t = P().tasks.find(q => q.id === $('taskPick').value);
     $('taskName').value = t ? t.name : ''; $('taskNote').value = t ? (t.note || '') : '';
     pickColor = t ? t.color : SW[P().tasks.length % SW.length]; $('taskColor').value = pickColor; syncSw();
     $('newNameWrap').firstChild.textContent = t ? 'Название задачи' : 'Название новой задачи';
-    $('assignBtn').textContent = t ? 'Сохранить и назначить' : 'Создать и назначить';
+    $('assignBtn').textContent = !t ? 'Создать задачу на эти чанки' : selMode === 'merge' ? 'Объединить в эту задачу' : selMode === 'extend' ? 'Добавить чанки к задаче' : 'Сохранить задачу';
   }
   $('taskPick').onchange = fillTaskFields;
   function dropChunks(chunks) { const ks = new Set(chunks.map(c => key(c[0], c[1]))); for (const t of P().tasks) t.chunks = t.chunks.filter(c => !ks.has(key(c[0], c[1]))); }
@@ -289,7 +342,7 @@
     let sx = 0, sz = 0; for (const [cx, cz] of t.chunks) { sx += cx * 16 + 8; sz += cz * 16 + 8; }
     topView(sx / t.chunks.length, sz / t.chunks.length, Math.max(80, Math.sqrt(t.chunks.length) * 60));
   });
-  $('volume').onchange = () => { buildVolume(); redraw(); };
+  $('volume').onchange = () => { buildTaskLines(); buildVolume(); redraw(); };
 
   /* ---------- base panel ---------- */
   $('baseScale').innerHTML = App.SCALES.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');

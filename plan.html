@@ -14,11 +14,12 @@
     <canvas id="view" tabindex="0" aria-label="3D-план платформы" style="display:block;width:100%;height:100%;touch-action:none;cursor:grab"></canvas>
     <div class="toolbar">
       <button class="btn" id="topView">Вид сверху</button>
+      <button class="btn" id="rectBtn" aria-pressed="false">Выделить рамкой</button>
       <button class="btn" id="sideView">Обзор</button>
       <button class="btn" id="toBase">К базе</button>
       <button class="btn" id="fullBtn">Во весь экран</button>
     </div>
-    <div class="hud" id="hud"><b>W</b><b>A</b><b>S</b><b>D</b> лететь · <b>Space</b>/<b>C</b> вверх/вниз · <b>Shift</b> быстрее · тяни мышью — смотреть · колесо — вперёд/назад · клик — выбрать чанк · <b>Shift</b>+клик — добавить<br><span id="camPos"></span></div>
+    <div class="hud" id="hud"><b>W</b><b>A</b><b>S</b><b>D</b> лететь · <b>Space</b>/<b>C</b> вверх/вниз · <b>Shift</b> быстрее · тяни мышью — смотреть · колесо — вперёд/назад · клик — выбрать чанк · <b>Shift</b>+клик — добавить · двойной клик — вся задача<br><span id="camPos"></span></div>
     <div class="banner" id="busy" hidden><h3>Считаю модель базы…</h3><p class="note">Около 85 тысяч блоков, это пара секунд.</p></div>
   </main>
 

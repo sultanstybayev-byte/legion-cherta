@@ -35,7 +35,7 @@
 3. **Settings → Pages** → **Deploy from a branch** → ветка **main**, папка **/ (root)** → **Save**.
 4. Через 1–2 минуты сайт откроется по адресу `https://ТВОЙ_ЛОГИН.github.io/legion-map/`.
 
-Если сайт у тебя уже выложен, просто загрузи новые файлы с заменой.
+Если сайт у тебя уже выложен, загрузи новые файлы с заменой. В архивах-обновлениях нет папки `data`, чтобы случайно не затереть твой `data/world.json`.
 
 > **Перед переходом на сервер сохрани свои данные.** На старой версии сайта: **Настройки → Скачать world.json**. Потом этот файл переносится на сервер (шаг 5).
 
@@ -49,8 +49,8 @@
 ## Шаг 3. Сервер на Cloudflare (бесплатно, около 10 минут)
 
 1. Зарегистрируйся на **dash.cloudflare.com**. Банковская карта не нужна.
-2. **База данных.** Слева **Storage & Databases → D1 SQL Database → Create**. Имя: `legion-map` → **Create**. Таблицы сервер создаст сам.
-3. **Сервер.** Слева **Workers & Pages → Create → Create Worker** (шаблон «Hello World»). Имя: `legion-api` → **Deploy**.
+2. **База данных.** Слева **Storage & databases → D1 SQLite Database → Create**. Имя: `legion-map` → **Create**. Таблицы сервер создаст сам.
+3. **Сервер.** Слева **Compute → Workers & Pages → Create → Start with Hello World!**. Имя: `legion-api` → **Deploy**.
 4. Нажми **Edit code**. Удали весь код в редакторе, вставь содержимое файла `server/worker.js` из этой папки и нажми **Deploy**.
 5. Открой воркер → **Settings → Bindings → Add → D1 database**. **Variable name**: `DB`, база: `legion-map` → **Add/Deploy**.
 6. **Settings → Variables and Secrets → Add**, три штуки:
