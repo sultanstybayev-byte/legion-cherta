@@ -10,7 +10,7 @@
   let data = { lists: [], items: [] }, filter = '', people = [];
 
   root.innerHTML = `
-    <div class="ph"><div><h1>Задачи</h1><p>Что нужно сделать на базе и кто этим занят. Списки ведут модераторы. Если задача на тебе, ты можешь сам двигать её между колонками.</p></div>
+    <div class="ph"><div><h1>Задачи</h1><p>Что нужно сделать на базе и кто этим занят. Списки ведут модераторы. Карточку можно зажать мышью и перетащить в другую колонку: модераторы двигают любые, участники — свои.</p></div>
       <div class="row">${mod ? '<button class="btn" id="addList">+ Список</button><button class="btn primary" id="addItem">+ Задача</button>' : ''}</div></div>
     <div class="lists" id="lists"></div>
     <div class="board" id="board"></div>
@@ -38,26 +38,58 @@
     const items = data.items.filter(i => !filter || String(i.list) === filter);
     $('board').innerHTML = ST.map(([k, v], si) => {
       const cs = items.filter(i => i.status === k);
-      return `<section class="col"><h2>${v}<span>${cs.length}</span></h2><div class="cards">${cs.map(i => card(i, si)).join('') || '<p class="note" style="padding:4px">Пусто</p>'}</div></section>`;
+      return `<section class="col" data-st="${k}"><h2>${v}<span>${cs.length}</span></h2><div class="cards">${cs.map(i => card(i)).join('') || '<p class="note" style="padding:4px">Пусто</p>'}</div></section>`;
     }).join('');
   }
-  function card(i, si) {
+  function card(i) {
     const l = listOf(i.list), mine = me && i.assignee === me, canMove = mod || mine, u = i.assignee ? App.users[i.assignee] : null;
-    return `<article class="tcard" style="--lc:${esc(l ? l.color : '#999')}">
+    return `<article class="tcard${canMove ? ' drag' : ''}" data-id="${i.id}" style="--lc:${esc(l ? l.color : '#999')}"${canMove ? ' title="Зажми и перетащи в другую колонку"' : ''}>
       <div class="tt">${esc(i.title)}</div>${i.note ? `<div class="tn">${App.text(i.note)}</div>` : ''}
       <div class="tf">${l ? `<span>${esc(l.name)}</span>` : ''}<span class="grow"></span>${u ? `${App.avatar(u, 20)}<span>${esc(u.name)}</span>` : i.assignee ? `<span>${esc(App.userName(i.assignee))}</span>` : '<span>без исполнителя</span>'}</div>
-      ${canMove || mod ? `<div class="tf">${canMove && si > 0 ? `<button class="btn sm" data-mv="${i.id}" data-to="${ST[si - 1][0]}" aria-label="Назад">←</button>` : ''}${canMove && si < 2 ? `<button class="btn sm" data-mv="${i.id}" data-to="${ST[si + 1][0]}">${si === 0 ? 'Взять в работу →' : 'Готово →'}</button>` : ''}<span class="grow"></span>${mod ? `<button class="btn sm" data-edit="${i.id}">Изменить</button>` : ''}</div>` : ''}
+      ${mod ? `<div class="tf"><span class="grow"></span><button class="btn sm" data-edit="${i.id}">Изменить</button></div>` : ''}
     </article>`;
   }
   $('lists').onclick = e => {
     const el = e.target.closest('[data-editlist]'); if (el) { openList(listOf(+el.dataset.editlist)); return; }
     const b = e.target.closest('[data-l]'); if (!b) return; filter = b.dataset.l; render();
   };
-  $('board').onclick = async e => {
-    const mv = e.target.closest('[data-mv]'), ed = e.target.closest('[data-edit]');
-    if (mv) { try { await App.api('PATCH', '/api/items/' + mv.dataset.mv, { status: mv.dataset.to }); await load(); } catch (er) { App.toast(er.message, 4000); } }
-    if (ed) openItem(data.items.find(i => i.id === +ed.dataset.edit));
+  $('board').onclick = e => {
+    if (Date.now() - dropped < 300) return;
+    const ed = e.target.closest('[data-edit]'); if (ed) openItem(data.items.find(i => i.id === +ed.dataset.edit));
   };
+
+  /* drag a card into another column: press, hold and move */
+  let dnd = null, dropped = 0, busy = false;
+  $('board').addEventListener('pointerdown', e => {
+    const c = e.target.closest('.tcard.drag'); if (!c || e.button !== 0 || e.target.closest('button, a')) return;
+    dnd = { c, id: +c.dataset.id, x: e.clientX, y: e.clientY, on: false, pid: e.pointerId };
+  });
+  const colAt = (x, y) => { const el = document.elementFromPoint(x, y); return el && el.closest('.col[data-st]'); };
+  window.addEventListener('pointermove', e => {
+    if (!dnd || e.pointerId !== dnd.pid) return;
+    if (!dnd.on) {
+      if (Math.abs(e.clientX - dnd.x) + Math.abs(e.clientY - dnd.y) < 6) return;
+      const r = dnd.c.getBoundingClientRect(); dnd.on = true; dnd.dx = e.clientX - r.left; dnd.dy = e.clientY - r.top;
+      dnd.ghost = dnd.c.cloneNode(true); dnd.ghost.classList.add('ghost'); dnd.ghost.style.width = r.width + 'px'; document.body.appendChild(dnd.ghost);
+      dnd.c.classList.add('lifted'); document.body.classList.add('dragging');
+    }
+    e.preventDefault();
+    dnd.ghost.style.transform = `translate(${e.clientX - dnd.dx}px, ${e.clientY - dnd.dy}px) rotate(1.5deg)`;
+    const col = colAt(e.clientX, e.clientY);
+    document.querySelectorAll('.col.over').forEach(x => x !== col && x.classList.remove('over')); if (col) col.classList.add('over');
+  });
+  const endDrag = async e => {
+    if (!dnd || e.pointerId !== dnd.pid) return; const d = dnd; dnd = null;
+    if (!d.on) return;
+    d.ghost.remove(); d.c.classList.remove('lifted'); document.body.classList.remove('dragging'); dropped = Date.now();
+    document.querySelectorAll('.col.over').forEach(x => x.classList.remove('over'));
+    const col = e.type === 'pointerup' && colAt(e.clientX, e.clientY), it = data.items.find(i => i.id === d.id);
+    if (!col || !it || col.dataset.st === it.status || busy) return;
+    const was = it.status; it.status = col.dataset.st; render(); busy = true;     // move right away, roll back if the server says no
+    try { await App.api('PATCH', '/api/items/' + it.id, { status: it.status }); } catch (er) { it.status = was; render(); App.toast(er.message, 4000); }
+    busy = false;
+  };
+  window.addEventListener('pointerup', endDrag); window.addEventListener('pointercancel', endDrag);
 
   /* item dialog */
   let editingItem = null;
@@ -106,5 +138,5 @@
   if (mod) { $('addList').onclick = () => openList(null); $('addItem').onclick = () => openItem(null); }
 
   try { await load(); } catch (e) { $('board').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
-  App.every(async () => { if (!document.querySelector('dialog[open]')) await load(); }, 30000);
+  App.every(async () => { if (!document.querySelector('dialog[open]') && !dnd) await load(); }, 30000);
 })();

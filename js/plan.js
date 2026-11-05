@@ -9,7 +9,8 @@
   const deny = () => { App.toast(App.user ? 'План меняют модераторы. Ты можешь смотреть.' : 'Войди через Telegram. План меняют модераторы.', 4000); return true; };
   const W = () => App.world, P = () => App.world.plan;
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-  const MATS = { 1: '#8b8f8e', 2: '#dcdedb', 3: '#f3ede4', 4: '#e0782b', 5: '#bdbdc1', 6: '#3c68c9', 7: '#a9d9cf', 8: '#e9b85a', 9: '#e6edf0', 10: '#e9ebec' };
+  const MATS = { 1: '#8b8f8e', 2: '#d9d9d3', 3: '#f3ede4', 4: '#e0782b', 5: '#a3a5a9', 6: '#3c68c9', 7: '#a9d9cf', 8: '#e9b85a', 9: '#e6edf0', 10: '#e9ebec', 11: '#4d7482' };
+  const isModel = d => d.kind === 'temple' || d.kind === 'lotus';
   const SW = ['#e07b2a', '#c0392b', '#d4ac0d', '#27ae60', '#16a085', '#2e86c1', '#7d3c98', '#d35490', '#6e2c00', '#5d6d7e'];
   const key = (cx, cz) => cx + ',' + cz;
   const sel = new Set();
@@ -54,7 +55,7 @@
     for (let i = 0; i <= n; i++) { pts.push(x0 + i * 16, 0.03, z0, x0 + i * 16, 0.03, z0 + L, x0, 0.03, z0 + i * 16, x0 + L, 0.03, z0 + i * 16); }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x555b60, transparent: true, opacity: .55 })); scene.add(lines);
-    colorGround();
+    buildCompass(); colorGround();
   }
   function colorGround() {
     indexTasks();
@@ -129,6 +130,35 @@
       sp.position.set(sx / t.chunks.length, 10, sz / t.chunks.length); sp.renderOrder = 10; scene.add(sp); labels.push(sp);
     }
   }
+  // cardinal directions around the platform: letter + the coordinate of that edge; corners get their X, Z
+  const compass = [];
+  function textSprite(lines, opt) {
+    const c = document.createElement('canvas'), g = c.getContext('2d'), fs = opt.fs || 40, f1 = `700 ${fs}px "Unbounded", "IBM Plex Sans", system-ui, sans-serif`, f2 = `500 ${Math.round(fs * .62)}px "JetBrains Mono", monospace`;
+    g.font = f1; let w = g.measureText(lines[0]).width; if (lines[1]) { g.font = f2; w = Math.max(w, g.measureText(lines[1]).width); }
+    c.width = Math.ceil(w) + 36; c.height = lines[1] ? Math.round(fs * 1.9) + 22 : fs + 26;
+    g.fillStyle = opt.bg || 'rgba(20,22,24,.8)'; roundRect(g, 0, 0, c.width, c.height, 14); g.fill();
+    g.textAlign = 'center'; g.textBaseline = 'top'; g.fillStyle = opt.fg || '#fff'; g.font = f1; g.fillText(lines[0], c.width / 2, 12);
+    if (lines[1]) { g.font = f2; g.fillStyle = 'rgba(255,255,255,.78)'; g.fillText(lines[1], c.width / 2, 16 + fs); }
+    const tex = new THREE.CanvasTexture(c); tex.minFilter = THREE.LinearFilter;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, sizeAttenuation: false, transparent: true }));
+    const h = opt.h || 0.06; sp.scale.set(h * c.width / c.height, h, 1); sp.renderOrder = 9; return sp;
+  }
+  function buildCompass() {
+    for (const s of compass) { scene.remove(s); s.material.map.dispose(); s.material.dispose(); } compass.length = 0;
+    const pl = P().platform, x0 = pl.cx0 * 16, z0 = pl.cz0 * 16, x1 = x0 + pl.size * 16, z1 = z0 + pl.size * 16, mx = (x0 + x1) / 2, mz = (z0 + z1) / 2, off = 14, acc = css('--accent') || '#e07b2a';
+    const add = (sp, x, z) => { sp.position.set(x, 3, z); scene.add(sp); compass.push(sp); };
+    add(textSprite(['С  север', `Z ${sgn(z0)}`], { bg: acc }), mx, z0 - off);
+    add(textSprite(['Ю  юг', `Z ${sgn(z1 - 1)}`], {}), mx, z1 + off);
+    add(textSprite(['З  запад', `X ${sgn(x0)}`], {}), x0 - off, mz);
+    add(textSprite(['В  восток', `X ${sgn(x1 - 1)}`], {}), x1 + off, mz);
+    for (const [x, z] of [[x0, z0], [x1 - 1, z0], [x0, z1 - 1], [x1 - 1, z1 - 1]]) add(textSprite([`${sgn(x)}, ${sgn(z)}`], { fs: 26, h: 0.032, bg: 'rgba(20,22,24,.62)' }), x + .5, z + .5);
+    // a north arrow on the ground
+    if (compassArrow) { scene.remove(compassArrow); compassArrow.geometry.dispose(); compassArrow.material.dispose(); }
+    const sh = new THREE.Shape(); sh.moveTo(0, -10); sh.lineTo(5, 4); sh.lineTo(0, 1); sh.lineTo(-5, 4); sh.closePath();
+    compassArrow = new THREE.Mesh(new THREE.ShapeGeometry(sh), new THREE.MeshBasicMaterial({ color: new THREE.Color(acc), side: THREE.DoubleSide }));
+    compassArrow.rotation.x = Math.PI / 2; compassArrow.position.set(mx, 0.1, z0 - off - 16); scene.add(compassArrow);
+  }
+  let compassArrow = null;
   function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
 
   /* ---------- structures placed on the platform ---------- */
@@ -137,10 +167,10 @@
   const lotusCache = new Map();          // def id -> { key, L, n, mat, col }
   const meshes = new Map();              // instance id -> Object3D
   let selStruct = null, selBox = null;
-  const lotusKey = d => d.scale + ':' + (d.edits || []).length + ':' + JSON.stringify((d.edits || []).slice(-3));
+  const lotusKey = d => d.kind + ':' + (d.edits || []).length + ':' + JSON.stringify((d.edits || []).slice(-3));
   function lotusData(def) {
     const k = lotusKey(def), c = lotusCache.get(def.id); if (c && c.key === k) return c;
-    const L = generateLotus(def.scale);
+    const L = generateTemple();
     for (const e of def.edits || []) if (Array.isArray(e) && e.length === 4) L.set(e[0] | 0, e[1] | 0, e[2] | 0, e[3] | 0);
     const N = L.N, list = [], occ = (x, y, z) => L.get(x, y, z) > 0;
     for (let y = 0; y < L.H; y++) for (let z = -N; z <= N; z++) for (let x = -N; x <= N; x++) {
@@ -154,7 +184,7 @@
   }
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
   function makeMesh(def, s) {
-    if (def.kind === 'lotus') {
+    if (isModel(def)) {
       const c = lotusData(def), m = new THREE.InstancedMesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, c.n));
       m.instanceMatrix.array.set(c.mat); m.instanceMatrix.needsUpdate = true;
       m.instanceColor = new THREE.InstancedBufferAttribute(c.col.slice(), 3); m.count = c.n; return m;
@@ -168,22 +198,26 @@
   function disposeObj(o) { o.traverse(x => { if (x.geometry && x.geometry !== boxGeo) x.geometry.dispose(); if (x.material) x.material.dispose(); }); }
   function syncStructures() {
     const hidden = App.pref('plan.hidden', false), need = insts().filter(s => defOf(s.def));
-    const wantLotus = need.some(s => { const d = defOf(s.def); return d.kind === 'lotus' && (!lotusCache.get(d.id) || lotusCache.get(d.id).key !== lotusKey(d)); });
+    const wantLotus = need.some(s => { const d = defOf(s.def); return isModel(d) && (!lotusCache.get(d.id) || lotusCache.get(d.id).key !== lotusKey(d)); });
     const go = () => {
       for (const [id, o] of meshes) { scene.remove(o); disposeObj(o); } meshes.clear();
       for (const s of need) {
         const def = defOf(s.def), o = makeMesh(def, s), fp = App.footprint(def, s);
-        if (def.kind === 'lotus') { o.position.set(fp.ox, 0, fp.oz); o.rotation.y = -(s.rot || 0) * Math.PI / 2; } else o.position.set((fp.x0 + fp.x1) / 2, 0, (fp.z0 + fp.z1) / 2);
+        placeMesh(o, def, s);
         o.visible = !hidden; o.userData.sid = s.id; scene.add(o); meshes.set(s.id, o);
       }
       drawSelBox(); renderStructs(); redraw();
     };
     if (wantLotus) { $('busy').hidden = false; setTimeout(() => { go(); $('busy').hidden = true; }, 30); } else go();
   }
+  function placeMesh(o, def, s) {
+    const fp = App.footprint(def, s);
+    if (isModel(def)) { o.position.set(fp.ox, 0, fp.oz); o.rotation.y = -(s.rot || 0) * Math.PI / 2; } else o.position.set((fp.x0 + fp.x1) / 2, 0, (fp.z0 + fp.z1) / 2);
+  }
   function drawSelBox() {
     if (selBox) { scene.remove(selBox); disposeObj(selBox); selBox = null; }
     const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
-    const fp = App.footprint(def, s), h = def.kind === 'lotus' ? (lotusCache.get(def.id) || { L: { H: 80 } }).L.H : def.h;
+    const fp = App.footprint(def, s), h = isModel(def) ? (lotusCache.get(def.id) || { L: { H: 80 } }).L.H : def.h;
     selBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(fp.x1 - fp.x0, h + 1, fp.z1 - fp.z0)), new THREE.LineBasicMaterial({ color: new THREE.Color(css('--accent') || '#e07b2a'), depthTest: false }));
     selBox.position.set((fp.x0 + fp.x1) / 2, (h + 1) / 2, (fp.z0 + fp.z1) / 2); selBox.renderOrder = 6; scene.add(selBox);
   }
@@ -192,7 +226,7 @@
     for (const s of insts()) {
       const def = defOf(s.def); if (!def) continue; const fp = App.footprint(def, s);
       if (x < fp.x0 - 1 || x > fp.x1 || z < fp.z0 - 1 || z > fp.z1) continue;
-      if (def.kind === 'lotus') {
+      if (isModel(def)) {
         const c = lotusCache.get(def.id); if (!c) continue;
         const a = (s.rot || 0) * Math.PI / 2, wx = x + .5 - fp.ox, wz = z + .5 - fp.oz;
         const lx = Math.floor(wx * Math.cos(a) + wz * Math.sin(a) + 1e-6), lz = Math.floor(-wx * Math.sin(a) + wz * Math.cos(a) + 1e-6);
@@ -207,16 +241,16 @@
   function renderStructs() {
     const list = insts(), pl = P().platform;
     $('structCount').textContent = list.length ? String(list.length) : '';
-    $('defPick').innerHTML = defs().map(d => `<option value="${esc(d.id)}">${esc(d.name)} — ${d.kind === 'lotus' ? 'модель' : `${d.w}×${d.d} чанк., ${d.h} бл.`}</option>`).join('');
+    $('defPick').innerHTML = defs().map(d => `<option value="${esc(d.id)}">${esc(d.name)} — ${isModel(d) ? 'модель' : `${d.w}×${d.d} чанк., ${d.h} бл.`}</option>`).join('');
     $('placedList').innerHTML = list.length ? list.map(s => {
       const def = defOf(s.def); if (!def) return '';
       const fp = App.footprint(def, s), out = fp.x0 < pl.cx0 * 16 || fp.z0 < pl.cz0 * 16 || fp.x1 > (pl.cx0 + pl.size) * 16 || fp.z1 > (pl.cz0 + pl.size) * 16;
-      return `<div class="item" data-sid="${esc(s.id)}" role="button" tabindex="0" ${s.id === selStruct ? 'style="background:var(--accent-soft)"' : ''}><span style="width:18px;height:18px;border-radius:5px;background:${esc(def.color)}"></span><span class="t">${esc(def.name)}</span><span class="c">чанк ${sgn(s.cx)}, ${sgn(s.cz)}${s.rot ? ' · поворот ' + s.rot * 90 + '°' : ''}${out ? ' · за краем платформы' : ''}</span></div>`;
+      return `<div class="item" data-sid="${esc(s.id)}" role="button" tabindex="0" ${s.id === selStruct ? 'style="background:var(--accent-soft)"' : ''}><span style="width:18px;height:18px;border-radius:5px;background:${esc(def.color)}"></span><span class="t">${esc(def.name)}</span><span class="c">центр X ${sgn(Math.floor(fp.ox))} · Z ${sgn(Math.floor(fp.oz))} · чанк ${sgn(s.cx)}, ${sgn(s.cz)}${s.rot ? ' · поворот ' + s.rot * 90 + '°' : ''}${out ? ' · за краем платформы' : ''}</span>${CAN ? `<span class="r"><button class="btn sm danger" data-sdel="${esc(s.id)}">Убрать</button></span>` : ''}</div>`;
     }).join('') : '<div class="empty">На платформе пока пусто. Выбери структуру выше и нажми «Поставить».</div>';
     const s = list.find(q => q.id === selStruct), def = s && defOf(s.def);
     $('structEdit').hidden = !s || !CAN; $('structEdit').style.display = $('structEdit').hidden ? 'none' : 'flex';
     if (s && def) { const fp = App.footprint(def, s); $('structInfo').innerHTML = `<b>${esc(def.name)}</b><br>центр X ${sgn(Math.floor(fp.ox))} · Z ${sgn(Math.floor(fp.oz))}<br>чанки X ${sgn(App.chunkOf(fp.x0))}…${sgn(App.chunkOf(fp.x1 - 1))}, Z ${sgn(App.chunkOf(fp.z0))}…${sgn(App.chunkOf(fp.z1 - 1))}`; }
-    else $('structInfo').textContent = list.length ? 'Выбери структуру в списке, чтобы двигать её.' : '';
+    else $('structInfo').textContent = list.length ? (CAN ? 'Зажми структуру в 3D мышью и тяни — она переедет по чанкам. Клик по строке — выбрать.' : 'Клик по строке — показать.') : '';
   }
   function selectStruct(id, fly) {
     selStruct = id; drawSelBox(); renderStructs(); showTab('structs');
@@ -224,16 +258,24 @@
     if (fly && def) { const fp = App.footprint(def, s), sz = Math.max(fp.x1 - fp.x0, fp.z1 - fp.z0); cam.x = fp.ox + sz * .5; cam.z = fp.oz + sz * 1.3; cam.y = sz * .6 + 10; const dx = fp.ox - cam.x, dz = fp.oz - cam.z, dy = 10 - cam.y; cam.yaw = Math.atan2(-dx, -dz); cam.pitch = Math.atan2(dy, Math.hypot(dx, dz)); }
     redraw();
   }
-  $('placedList').addEventListener('click', e => { const it = e.target.closest('[data-sid]'); if (it) selectStruct(it.dataset.sid, true); });
+  let rowDelArm = { id: null, t: 0 };
+  function removeStruct(id) { P().structures = insts().filter(q => q.id !== id); if (selStruct === id) selStruct = null; App.save('structures'); syncStructures(); }
+  $('placedList').addEventListener('click', e => {
+    const del = e.target.closest('[data-sdel]');
+    if (del) { e.stopPropagation(); if (!CAN && deny()) return; const id = del.dataset.sdel;
+      if (rowDelArm.id !== id || Date.now() - rowDelArm.t > 3000) { rowDelArm = { id, t: Date.now() }; del.textContent = 'Точно?'; return; }
+      removeStruct(id); return; }
+    const it = e.target.closest('[data-sid]'); if (it) selectStruct(it.dataset.sid, true);
+  });
   $('placeBtn').onclick = () => {
     if (!CAN && deny()) return;
     const def = defOf($('defPick').value); if (!def) return;
     const cs = selChunks(), pl = P().platform;
     let cx = cs.length === 1 ? cs[0][0] : pl.cx0 + Math.floor(pl.size / 2), cz = cs.length === 1 ? cs[0][1] : pl.cz0 + Math.floor(pl.size / 2);
-    if (def.kind !== 'lotus' && cs.length !== 1) { cx -= Math.floor(def.w / 2); cz -= Math.floor(def.d / 2); }
+    if (!isModel(def) && cs.length !== 1) { cx -= Math.floor(def.w / 2); cz -= Math.floor(def.d / 2); }
     const s = { id: uid(), def: def.id, cx, cz, rot: 0 }; insts().push(s);
     App.save('structures'); syncStructures(); selectStruct(s.id, true);
-    App.toast(`«${def.name}» поставлена. Двигай стрелками в этой вкладке.`);
+    App.toast(`«${def.name}» поставлена. Зажми её мышью и тяни, чтобы переставить.`);
   };
   document.querySelectorAll('[data-smove]').forEach(btn => btn.onclick = () => {
     if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct); if (!s) return;
@@ -249,8 +291,7 @@
   $('structDel').onclick = () => {
     if (!CAN && deny()) return;
     if (Date.now() - sDelArm > 3000) { sDelArm = Date.now(); $('structDel').textContent = 'Точно убрать?'; return; }
-    P().structures = insts().filter(q => q.id !== selStruct); selStruct = null; $('structDel').textContent = 'Убрать с платформы';
-    App.save('structures'); syncStructures();
+    $('structDel').textContent = 'Убрать с платформы'; removeStruct(selStruct);
   };
   $('structHidden').checked = App.pref('plan.hidden', false);
   $('structHidden').onchange = e => { App.setPref('plan.hidden', e.target.checked); for (const o of meshes.values()) o.visible = !e.target.checked; redraw(); };
@@ -270,12 +311,25 @@
     if (e.pointerType === 'touch') { touches.set(e.pointerId, [e.clientX, e.clientY]); if (touches.size === 2) { const [a, b] = [...touches.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); } }
     canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, id: e.pointerId, t: Date.now(), moved: false, shift: e.shiftKey || e.ctrlKey || e.metaKey }; canvas.style.cursor = rectMode ? 'crosshair' : 'grabbing';
     if (rectMode && e.button === 0 && e.pointerType !== 'touch' || rectMode && e.pointerType === 'touch' && touches.size === 1) { const c = chunkAt(e.clientX, e.clientY); if (c) rect = { a: c, keep: drag.shift ? new Set(sel) : new Set() }; }
+    else if (CAN && e.button === 0 && touches.size <= 1) {   // press on a structure: drag it over the chunks
+      const h = rayHit(e.clientX, e.clientY, true);
+      if (h && h.s) { const p0 = planeAt(e.clientX, e.clientY, h.y + .5); if (p0) drag.struct = { s: h.s, cx: h.s.cx, cz: h.s.cz, y: h.y + .5, p0 }; }
+    }
   });
   canvas.addEventListener('pointermove', e => {
     if (touches.has(e.pointerId)) { touches.set(e.pointerId, [e.clientX, e.clientY]); if (pinch != null && touches.size === 2) { const [a, b] = [...touches.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); move(0, 0, 0, (d - pinch) * .5); pinch = d; if (drag) drag.moved = true; return; } }
     if (!drag || drag.id !== e.pointerId) return;
     if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 5) drag.moved = true;
     if (rect) { if (drag.moved) { const c = chunkAt(e.clientX, e.clientY); if (c) applyRect(c); } drag.x = e.clientX; drag.y = e.clientY; return; }
+    if (drag.struct) {
+      if (!drag.moved) return; const st = drag.struct, s = st.s, def = defOf(s.def);
+      if (!st.started) { st.started = true; canvas.style.cursor = 'move'; if (selStruct !== s.id) { selStruct = s.id; drawSelBox(); renderStructs(); showTab('structs'); } }
+      const p = planeAt(e.clientX, e.clientY, st.y); if (!p || !def) return;
+      const cx = st.cx + Math.round((p.x - st.p0.x) / 16), cz = st.cz + Math.round((p.z - st.p0.z) / 16);
+      if (cx !== s.cx || cz !== s.cz) { s.cx = cx; s.cz = cz; const o = meshes.get(s.id); if (o) placeMesh(o, def, s); drawSelBox(); redraw();
+        const fp = App.footprint(def, s); $('structInfo').textContent = `${def.name}: центр X ${sgn(Math.floor(fp.ox))} · Z ${sgn(Math.floor(fp.oz))}`; }
+      return;
+    }
     if (drag.moved) look(e.clientX - drag.x, e.clientY - drag.y); drag.x = e.clientX; drag.y = e.clientY;
   });
   const up = e => {
@@ -284,8 +338,15 @@
     const d = drag; drag = null; canvas.style.cursor = rectMode ? 'crosshair' : 'grab';
     const wasRect = rect && d.moved; rect = null;
     if (wasRect) { renderSel(); return; }
+    if (d.struct && d.moved) { const st = d.struct; if (st.s.cx !== st.cx || st.s.cz !== st.cz) { App.save('structures'); App.toast(`Перенесено на ${sgn(st.s.cx - st.cx)}, ${sgn(st.s.cz - st.cz)} чанк.`); } renderStructs(); return; }
     if (!d.moved && Date.now() - d.t < 600 && e.button !== 2) pickAt(e.clientX, e.clientY, d.shift);
   };
+  let hoverT = 0;
+  canvas.addEventListener('pointermove', e => {
+    if (drag || !CAN || rectMode || e.pointerType === 'touch' || !insts().length) return;
+    const now = performance.now(); if (now - hoverT < 90) return; hoverT = now;
+    canvas.style.cursor = rayHit(e.clientX, e.clientY, true) ? 'move' : 'grab';
+  });
   canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', e => { touches.delete(e.pointerId); drag = null; pinch = null; });
   canvas.addEventListener('dblclick', e => {   // double click selects the whole task under the cursor
     const c = chunkAt(e.clientX, e.clientY); if (!c) return; const t = taskOf.get(key(c[0], c[1])); if (!t) return;
@@ -328,22 +389,30 @@
     if (d.y > -1e-4) return null; const t = -o.y / d.y;
     return [App.chunkOf(Math.floor(o.x + d.x * t)), App.chunkOf(Math.floor(o.z + d.z * t))];
   }
-  function pickAt(clientX, clientY, add) {
+  function rayOf(clientX, clientY) {
     const r = canvas.getBoundingClientRect(); camera.updateMatrixWorld();
     const v = new THREE.Vector3(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1, 0.5).unproject(camera);
-    const o = camera.position.clone(), d = v.sub(o).normalize();
-    let hit = null;
+    const o = camera.position.clone(); return { o, d: v.sub(o).normalize() };
+  }
+  function planeAt(clientX, clientY, y) { const { o, d } = rayOf(clientX, clientY); if (Math.abs(d.y) < 1e-4) return null; const t = (y - o.y) / d.y; return t > 0 ? { x: o.x + d.x * t, z: o.z + d.z * t } : null; }
+  // first structure block along the ray ({x, y, z, s}), else the ground point
+  function rayHit(clientX, clientY, structOnly) {
+    const { o, d } = rayOf(clientX, clientY);
     if (insts().length && !App.pref('plan.hidden', false)) {
       let x = Math.floor(o.x), y = Math.floor(o.y), z = Math.floor(o.z);
       const sx = d.x > 0 ? 1 : -1, sy = d.y > 0 ? 1 : -1, sz = d.z > 0 ? 1 : -1, tdx = Math.abs(1 / d.x), tdy = Math.abs(1 / d.y), tdz = Math.abs(1 / d.z);
       let tx = (d.x > 0 ? (x + 1 - o.x) : (o.x - x)) * tdx, ty = (d.y > 0 ? (y + 1 - o.y) : (o.y - y)) * tdy, tz = (d.z > 0 ? (z + 1 - o.z) : (o.z - z)) * tdz;
       for (let i = 0; i < 3000; i++) {
-        if (y >= 0 && y < 400 && solidAt(x, y, z)) { hit = { x, z }; break; }
+        if (y >= 0 && y < 400) { const s = solidAt(x, y, z); if (s) return { x, y, z, s }; }
         if (tx < ty && tx < tz) { x += sx; tx += tdx; } else if (ty < tz) { y += sy; ty += tdy; } else { z += sz; tz += tdz; }
         if (y < -1 || Math.min(tx, ty, tz) > 2500) break;
       }
     }
-    if (!hit && d.y < -1e-4) { const t = -o.y / d.y; hit = { x: Math.floor(o.x + d.x * t), z: Math.floor(o.z + d.z * t) }; }
+    if (structOnly || d.y > -1e-4) return null;
+    const t = -o.y / d.y; return { x: Math.floor(o.x + d.x * t), y: 0, z: Math.floor(o.z + d.z * t), s: null };
+  }
+  function pickAt(clientX, clientY, add) {
+    const hit = rayHit(clientX, clientY, false);
     if (!hit) return;
     const cx = App.chunkOf(hit.x), cz = App.chunkOf(hit.z), pl = P().platform;
     if (cx < pl.cx0 || cz < pl.cz0 || cx >= pl.cx0 + pl.size || cz >= pl.cz0 + pl.size) { if (!add) { sel.clear(); colorGround(); renderSel(); } return; }

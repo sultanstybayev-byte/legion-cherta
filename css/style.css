@@ -297,3 +297,10 @@ textarea.drop{outline:2px dashed var(--accent)}
 }
 .btn.tg,.btn.primary.tg{background:#2aa3e0;border-color:#2aa3e0;color:#fff;font-weight:600;padding:10px 14px}
 .chat-feed .day{font:12px var(--mono);color:var(--muted);text-align:center;padding:8px 14px 2px}
+/* task board: drag & drop */
+.tcard.drag{cursor:grab;touch-action:none;user-select:none}
+.tcard.lifted{opacity:.35}
+.tcard.ghost{position:fixed;left:0;top:0;z-index:1000;pointer-events:none;box-shadow:0 14px 34px rgba(0,0,0,.35);cursor:grabbing}
+body.dragging,body.dragging *{cursor:grabbing!important;user-select:none}
+.col.over{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--accent-soft)}
+.col .cards{min-height:90px}

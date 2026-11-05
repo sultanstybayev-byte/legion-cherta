@@ -170,7 +170,7 @@ function cleanDefs(list) {
   return list.slice(0, 100).map(d => {
     const edits = Array.isArray(d.edits) ? d.edits.filter(e => Array.isArray(e) && e.length === 4 && e.every(Number.isFinite)).map(e => e.map(v => Math.trunc(v))) : [];
     total += edits.length; if (total > 200000) fail(413, 'Слишком много правок в структурах');
-    return { id: str(d.id, 40, 'id') || String(now()), name: str(d.name, 60, 'Название') || 'Структура', kind: d.kind === 'lotus' ? 'lotus' : 'box',
+    return { id: str(d.id, 40, 'id') || String(now()), name: str(d.name, 60, 'Название') || 'Структура', kind: ['temple', 'lotus'].includes(d.kind) ? d.kind : 'box',
       scale: [0.55, 0.75, 1].includes(Number(d.scale)) ? Number(d.scale) : 1, edits,
       w: int(d.w || 1, 'Ширина', 1, 32), d: int(d.d || 1, 'Глубина', 1, 32), h: int(d.h || 8, 'Высота', 1, 320), color: color(d.color), note: str(d.note, 600, 'Заметка') };
   });

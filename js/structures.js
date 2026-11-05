@@ -6,43 +6,41 @@
   App.mountShell('structs');
   const CAN = App.can('plan');
   const W = () => App.world, defs = () => W().structdefs;
-  const MATS = { 1: '#8b8f8e', 2: '#dcdedb', 3: '#f3ede4', 4: '#e0782b', 5: '#bdbdc1', 6: '#3c68c9', 7: '#a9d9cf', 8: '#e9b85a', 9: '#e6edf0', 10: '#e9ebec' };
+  const MATS = { 1: '#8b8f8e', 2: '#d9d9d3', 3: '#f3ede4', 4: '#e0782b', 5: '#a3a5a9', 6: '#3c68c9', 7: '#a9d9cf', 8: '#e9b85a', 9: '#e6edf0', 10: '#e9ebec', 11: '#4d7482' };
+  const isModel = d => d.kind === 'temple' || d.kind === 'lotus';
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   let cur = defs()[0] ? defs()[0].id : null;
   const placed = id => W().plan.structures.filter(s => s.def === id).length;
 
   /* ---------- list & editor ---------- */
-  $('dScale').innerHTML = App.SCALES.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
   if (!CAN) { $('addRow').hidden = true; $('edButtons').hidden = true; }
   function renderList() {
     $('defList').innerHTML = defs().map(d => `<div class="item" data-id="${esc(d.id)}" role="button" tabindex="0" ${d.id === cur ? 'style="background:var(--accent-soft)"' : ''}>
       <span style="width:18px;height:18px;border-radius:5px;background:${esc(d.color)}"></span><span class="t">${esc(d.name)}</span>
-      <span class="c">${d.kind === 'lotus' ? 'готовая модель' : `заготовка ${d.w}×${d.d} чанк., ${d.h} бл.`}</span><span class="r">${placed(d.id) ? 'на платформе: ' + placed(d.id) : ''}</span></div>`).join('')
+      <span class="c">${isModel(d) ? 'готовая модель' : `заготовка ${d.w}×${d.d} чанк., ${d.h} бл.`}</span><span class="r">${placed(d.id) ? 'на платформе: ' + placed(d.id) : ''}</span></div>`).join('')
       || '<div class="empty">Структур пока нет.</div>';
   }
   function renderEditor() {
     const d = defs().find(q => q.id === cur); $('editor').hidden = !d; if (!d) return;
     $('edHead').textContent = d.name; $('dName').value = d.name; $('dColor').value = d.color || '#e07b2a'; $('dNote').value = d.note || '';
-    const lot = d.kind === 'lotus';
+    const lot = isModel(d);
     $('boxDims').hidden = lot; $('lotusOpts').hidden = !lot; $('lotusOpts').style.display = lot ? 'flex' : 'none';
-    $('dKind').textContent = lot ? 'Готовая модель из блоков. Размер задаётся масштабом.' : 'Заготовка: на платформе это цветной блок нужного размера. Модель сделаем позже.';
-    $('dW').value = d.w; $('dD').value = d.d; $('dH').value = d.h; $('dScale').value = String(d.scale || 1);
-    $('dEdits').textContent = (d.edits || []).length ? `Правки модели: ${fmt(d.edits.length)} блоков.` : 'Правок нет: исходная модель.';
+    $('dKind').textContent = lot ? 'Готовая модель из блоков, масштаб один: 1 метр настоящего храма = 2,4 блока.' : 'Заготовка: на платформе это цветной блок нужного размера. Модель сделаем позже.';
+    $('dW').value = d.w; $('dD').value = d.d; $('dH').value = d.h;
+    $('dEdits').innerHTML = lot ? '179×179 блоков (около 11×11 чанков), 84 в высоту, диаметр бутона 108. 27 лепестков: 9 бутона, 9 внешних, 9 входных. Внутри пусто: пол, 9 арок в зал, стеклянный потолок под бутоном, стекло в арках входов с проёмом 5×6.' : '';
     $('dDel').textContent = 'Удалить'; delArm = 0;
-    ['dName', 'dColor', 'dNote', 'dW', 'dD', 'dH', 'dScale'].forEach(id => $(id).disabled = !CAN);
-    ['importEdits', 'clearEdits'].forEach(id => $(id).hidden = !CAN);
+    ['dName', 'dColor', 'dNote', 'dW', 'dD', 'dH'].forEach(id => $(id).disabled = !CAN);
   }
   function select(id) { cur = id; renderList(); renderEditor(); preview(); }
   $('defList').addEventListener('click', e => { const it = e.target.closest('[data-id]'); if (it) select(it.dataset.id); });
   $('addDef').onclick = () => {
-    const d = { id: uid(), name: 'Новая структура', kind: 'box', w: 2, d: 2, h: 12, color: '#2e86c1', note: '', scale: 1, edits: [] };
+    const d = { id: uid(), name: 'Новая структура', kind: 'box', w: 2, d: 2, h: 12, color: '#2e86c1', note: '', edits: [] };
     defs().push(d); App.save('structdefs'); select(d.id); $('dName').focus(); $('dName').select();
   };
   $('dSave').onclick = () => {
     const d = defs().find(q => q.id === cur); if (!d) return;
     d.name = $('dName').value.trim() || 'Структура'; d.color = $('dColor').value; d.note = $('dNote').value.trim();
-    if (d.kind === 'lotus') { const s = +$('dScale').value; if (s !== d.scale && (d.edits || []).length) App.toast('Правки сделаны для другого масштаба и могут лечь не туда.', 5000); d.scale = s; }
-    else { d.w = Math.min(32, Math.max(1, Math.round(+$('dW').value || 1))); d.d = Math.min(32, Math.max(1, Math.round(+$('dD').value || 1))); d.h = Math.min(320, Math.max(1, Math.round(+$('dH').value || 8))); }
+    if (!isModel(d)) { d.w = Math.min(32, Math.max(1, Math.round(+$('dW').value || 1))); d.d = Math.min(32, Math.max(1, Math.round(+$('dD').value || 1))); d.h = Math.min(320, Math.max(1, Math.round(+$('dH').value || 8))); }
     App.save('structdefs'); renderList(); renderEditor(); preview(); App.toast('Структура сохранена');
   };
   let delArm = 0;
@@ -53,17 +51,6 @@
     if (n) { W().plan.structures = W().plan.structures.filter(s => s.def !== d.id); App.save('structures'); }
     App.save('structdefs'); cur = defs()[0] ? defs()[0].id : null; select(cur);
   };
-  $('importEdits').onclick = () => { $('importText').value = ''; $('importMsg').textContent = ''; $('importDlg').showModal(); $('importText').focus(); };
-  $('importDlg').querySelector('[data-close]').onclick = () => $('importDlg').close();
-  $('importOk').onclick = () => {
-    let j; try { j = JSON.parse($('importText').value); } catch (e) { $('importMsg').textContent = 'Не получилось прочитать текст. Скопируй его целиком ещё раз.'; return; }
-    if (!j || j.kind !== 'lotus-base' || !Array.isArray(j.edits)) { $('importMsg').textContent = 'Это не данные модели. Нужна кнопка «Скопировать для планировщика» на странице «Лотос Легиона».'; return; }
-    const d = defs().find(q => q.id === cur); if (!d) return;
-    d.scale = [0.55, 0.75, 1].includes(+j.scale) ? +j.scale : 1; d.edits = j.edits.filter(e => Array.isArray(e) && e.length === 4 && e.every(Number.isFinite));
-    App.save('structdefs'); $('importDlg').close(); renderEditor(); preview(); App.toast(`Правки применены: ${fmt(d.edits.length)} блоков`);
-  };
-  $('clearEdits').onclick = () => { const d = defs().find(q => q.id === cur); if (!d) return; d.edits = []; App.save('structdefs'); renderEditor(); preview(); };
-
   /* ---------- 3D preview with an orbit camera ---------- */
   if (!window.THREE) { $('stage').innerHTML = '<div class="banner"><h3>3D не загрузился</h3><p class="note">Не удалось загрузить three.js.</p></div>'; renderList(); renderEditor(); return; }
   const canvas = $('view'), renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -91,8 +78,8 @@
     clear(); const d = defs().find(q => q.id === cur); if (!d) { draw(); return; }
     const build = () => {
       let wBlocks, dBlocks, h;
-      if (d.kind === 'lotus') {
-        const L = generateLotus(d.scale || 1);
+      if (isModel(d)) {
+        const L = generateTemple();
         for (const e of d.edits || []) if (Array.isArray(e) && e.length === 4) L.set(e[0] | 0, e[1] | 0, e[2] | 0, e[3] | 0);
         const N = L.N, list = [], occ = (x, y, z) => L.get(x, y, z) > 0;
         for (let y = 0; y < L.H; y++) for (let z = -N; z <= N; z++) for (let x = -N; x <= N; x++) {
@@ -102,7 +89,7 @@
         }
         const n = list.length / 4; model = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, n));
         for (let i = 0; i < n; i++) { tmpM.makeTranslation(list[4 * i] + .5, list[4 * i + 1] + .5, list[4 * i + 2] + .5); model.setMatrixAt(i, tmpM); model.setColorAt(i, tmpC.set(MATS[list[4 * i + 3]] || '#ddd')); }
-        model.count = n; wBlocks = dBlocks = 2 * N + 1; h = L.H;
+        model.count = n; wBlocks = dBlocks = 2 * App.TEMPLE_N + 1; h = L.H;
         $('dims').textContent = `${wBlocks}×${dBlocks} блоков, ${h} в высоту, ${fmt(n)} видимых блоков`;
       } else {
         wBlocks = d.w * 16; dBlocks = d.d * 16; h = d.h;
@@ -120,7 +107,7 @@
       ground = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x777f86, transparent: true, opacity: .6 })); scene.add(ground);
       const span = Math.max(wBlocks, dBlocks, h * 1.2); orbit.r = span * 1.7 + 20; orbit.ty = h * 0.4; draw(); $('busy').hidden = true;
     };
-    if (d.kind === 'lotus') { $('busy').hidden = false; setTimeout(build, 30); } else build();
+    if (isModel(d)) { $('busy').hidden = false; setTimeout(build, 30); } else build();
   }
   renderList(); renderEditor(); resize(); preview();
 })();

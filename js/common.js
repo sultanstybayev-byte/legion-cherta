@@ -37,7 +37,9 @@
     out.plan = { platform: Object.assign(defaults().plan.platform, p.platform || {}), base: Object.assign(defaults().plan.base, p.base || {}), tasks: Array.isArray(p.tasks) ? p.tasks.filter(t => t && Array.isArray(t.chunks)) : [],
       structures: Array.isArray(p.structures) ? p.structures.filter(s => s && s.def) : [] };
     if (!Array.isArray(out.plan.base.edits)) out.plan.base.edits = [];
-    out.structdefs = Array.isArray(w.structdefs) && w.structdefs.length ? w.structdefs : [{ id: 'lotus', name: 'Лотос Легиона', kind: 'lotus', scale: out.plan.base.scale || 1, edits: out.plan.base.edits || [], w: 10, d: 10, h: 86, color: '#e07b2a', note: 'Главное здание легиона: 6 центральных, 8 средних и 8 входных лепестков.' }];
+    // the main building is the Lotus Temple model; an old "Лотос Легиона" entry (kind lotus) turns into it, keeping its placements
+    const temple = id => ({ id, name: 'Храм Лотоса', kind: 'temple', edits: [], w: 11, d: 11, h: App.TEMPLE_H, color: '#e07b2a', note: 'Главное здание легиона по образцу Храма Лотоса в Дели: 27 лепестков, 9 входов. Внутри пока пусто, только пол.' });
+    out.structdefs = Array.isArray(w.structdefs) && w.structdefs.length ? w.structdefs.map(d => d && d.kind === 'lotus' ? temple(d.id) : d) : [temple('lotus')];
     delete out.users;
     return out;
   }
@@ -494,14 +496,13 @@
   /* where a placed structure sits, in blocks: [x0, x1) × [z0, z1) */
   App.footprint = (def, s) => {
     if (!def) return null;
-    if (def.kind === 'lotus') { const N = App.BASE_N[String(def.scale)] || 73, ox = s.cx * 16 + 8, oz = s.cz * 16 + 8; return { x0: ox - N, x1: ox + N + 1, z0: oz - N, z1: oz + N + 1, ox, oz }; }
+    if (def.kind === 'temple' || def.kind === 'lotus') { const N = App.TEMPLE_N, ox = s.cx * 16 + 8, oz = s.cz * 16 + 8; return { x0: ox - N, x1: ox + N + 1, z0: oz - N, z1: oz + N + 1, ox, oz }; }
     const odd = (s.rot || 0) % 2 === 1, W = odd ? def.d : def.w, D = odd ? def.w : def.d, x0 = s.cx * 16, z0 = s.cz * 16;
     return { x0, x1: x0 + W * 16, z0, z1: z0 + D * 16, ox: x0 + W * 8, oz: z0 + D * 8 };
   };
 
   /* shared constants */
   App.chunkOf = v => Math.floor(v / 16);
-  App.BASE_N = { '0.55': 40, '0.75': 54, '1': 73 };
-  App.SCALES = [[0.55, 'Компакт'], [0.75, 'Поменьше'], [1, 'Как на фото']];
+  App.TEMPLE_N = 89; App.TEMPLE_H = 84;     // Храм Лотоса: centre block ± 89, 84 high (see js/temple.js)
   window.App = App;
 })();

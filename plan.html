@@ -19,14 +19,14 @@
       <button class="btn" id="sideView">Обзор</button>
       <button class="btn" id="fullBtn">Во весь экран</button>
     </div>
-    <div class="hud" id="hud"><b>W</b><b>A</b><b>S</b><b>D</b> лететь · <b>Space</b>/<b>C</b> вверх/вниз · <b>Shift</b> быстрее · мышь — смотреть · колесо — вперёд/назад<br>клик — чанк · <b>Shift</b>+клик — добавить · двойной клик — вся задача · <span id="camPos"></span></div>
+    <div class="hud" id="hud"><b>W</b><b>A</b><b>S</b><b>D</b> лететь · <b>Space</b>/<b>C</b> вверх/вниз · <b>Shift</b> быстрее · мышь — смотреть · колесо — вперёд/назад<br>клик — чанк · <b>Shift</b>+клик — добавить · двойной клик — вся задача · зажми структуру и тяни — переставить · <span id="camPos"></span></div>
     <div class="banner" id="busy" hidden><h3>Считаю модель…</h3><p class="note">Большая структура, это пара секунд.</p></div>
   </main>
 
   <aside class="side" aria-label="Задачи, база и платформа">
     <div class="ptabs" role="tablist">
       <button role="tab" data-tab="tasks" aria-selected="true">Задачи <span class="note" id="taskCount"></span></button>
-      <button role="tab" data-tab="structs" aria-selected="false">Структуры <span class="note" id="structCount"></span></button>
+      <button role="tab" data-tab="structs" aria-selected="false">База <span class="note" id="structCount"></span></button>
       <button role="tab" data-tab="platform" aria-selected="false">Платформа</button>
     </div>
 
@@ -61,11 +61,11 @@
       <section class="sec">
         <h2>Поставить на платформу</h2>
         <label class="f">Структура из библиотеки<select id="defPick"></select></label>
-        <div class="row" id="placeRow"><button class="btn primary" id="placeBtn">Поставить</button><span class="note grow">в выбранный чанк или в центр платформы</span></div>
+        <div class="row" id="placeRow"><button class="btn primary" id="placeBtn">Поставить</button><span class="note grow">в выбранный чанк или в центр платформы, потом её можно тянуть мышью</span></div>
         <p class="note"><a href="structures.html">Библиотека структур →</a> там создаются и дорабатываются постройки.</p>
       </section>
       <section class="sec">
-        <div class="row"><h2 class="grow">На платформе</h2><label class="chip"><input type="checkbox" id="structHidden"><span class="dot" style="background:var(--muted)"></span>Скрыть в 3D</label></div>
+        <div class="row"><h2 class="grow">Поставленные структуры</h2><label class="chip"><input type="checkbox" id="structHidden"><span class="dot" style="background:var(--muted)"></span>Скрыть в 3D</label></div>
         <p class="note mono" id="structInfo"></p>
         <div id="structEdit" hidden style="display:flex;flex-direction:column;gap:10px">
           <div class="row">
@@ -102,7 +102,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="js/config.js"></script>
 <script src="js/common.js"></script>
-<script src="js/lotus.js"></script>
+<script src="js/temple.js"></script>
 <script src="js/plan.js"></script>
 </body>
 </html>

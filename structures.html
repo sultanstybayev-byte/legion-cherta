@@ -32,29 +32,16 @@
         <label class="f">Глубина, чанков<input type="number" id="dD" min="1" max="32" step="1"></label>
         <label class="f">Высота, блоков<input type="number" id="dH" min="1" max="320" step="1"></label>
       </div>
-      <div id="lotusOpts" style="display:flex;flex-direction:column;gap:10px">
-        <label class="f">Масштаб<select id="dScale"></select></label>
-        <p class="note" id="dEdits"></p>
-        <div class="row"><button class="btn" id="importEdits">Вставить правки со страницы «Лотос Легиона»…</button><button class="btn" id="clearEdits">Убрать правки</button></div>
-      </div>
+      <div id="lotusOpts" style="display:flex;flex-direction:column;gap:10px"><p class="note" id="dEdits"></p></div>
       <label class="f">Заметка<textarea id="dNote" maxlength="600" placeholder="что это, из чего строить, что доработать"></textarea></label>
       <div class="row" id="edButtons"><button class="btn primary" id="dSave">Сохранить</button><span class="spacer"></span><button class="btn danger" id="dDel">Удалить</button></div>
     </section>
   </aside>
 </div>
-<dialog id="importDlg">
-  <div class="dh"><h2>Правки модели</h2><button class="btn sm" data-close>Закрыть</button></div>
-  <div class="db">
-    <p class="note">На странице «Лотос Легиона» нажми <b>«Скопировать для планировщика»</b> и вставь сюда то, что скопировалось.</p>
-    <textarea id="importText" style="min-height:160px" class="mono" placeholder='{"kind":"lotus-base", …}'></textarea>
-    <p class="note" id="importMsg"></p>
-  </div>
-  <div class="df"><button class="btn primary" id="importOk">Применить</button></div>
-</dialog>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="js/config.js"></script>
 <script src="js/common.js"></script>
-<script src="js/lotus.js"></script>
+<script src="js/temple.js"></script>
 <script src="js/structures.js"></script>
 </body>
 </html>
