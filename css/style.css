@@ -377,3 +377,9 @@ body.walking .cmdbar input:not(:focus){opacity:.55}
 .posrow .ax { display: flex; align-items: center; gap: 6px; font: 600 13px/1 var(--mono, "JetBrains Mono", monospace); min-width: 0; }
 .posrow .ax input { width: 100%; min-width: 0; }
 .posrow .ax-x { color: #e74c3c; } .posrow .ax-y { color: #2ecc71; } .posrow .ax-z { color: #3a8ee6; }
+/* what the selected shape lines up with (structure editor guides) */
+.guideinfo { position: absolute; left: 50%; transform: translateX(-50%); top: 112px; z-index: 501; max-width: min(760px, calc(100% - 32px)); display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: center;
+  padding: 7px 12px; border-radius: 10px; background: rgba(20, 22, 24, .82); color: #fff; font: 500 12px/1.35 var(--mono, "JetBrains Mono", monospace); pointer-events: none; }
+.guideinfo:empty { display: none; }
+.guideinfo span:not(:first-child) { color: #ffd24a; }
+body.walking .guideinfo { display: none; }

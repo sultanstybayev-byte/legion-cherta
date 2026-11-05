@@ -7,7 +7,7 @@
 <script>/* theme before first paint: saved choice, dark by default */ try { document.documentElement.dataset.theme = localStorage.getItem("mcmap.theme") || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
-<link rel="stylesheet" href="css/style.css?v=1107">
+<link rel="stylesheet" href="css/style.css?v=1108">
 </head>
 <body>
 <div class="app">
@@ -28,6 +28,7 @@
     </div>
     <div class="crosshair" aria-hidden="true"></div>
     <div class="hotbar" id="hotbar"></div>
+    <div class="guideinfo" id="guideInfo" aria-live="polite"></div>
     <div class="hud" id="hud"></div>
     <form class="cmdbar" id="cmdForm" autocomplete="off">
       <input type="text" id="cmd" placeholder="Команда: начни с // — появятся подсказки (например //set stone)" spellcheck="false">
@@ -129,6 +130,8 @@
         <p class="note keys"><b>Стрелки X/Y/Z</b> на фигуре — тяни мышью, шаг 1 блок (с <kbd>Shift</kbd> — 0,1). Стрелки есть и на выделенной области: тянешь — переносятся её блоки.<br><b>Клавиши, как в Blender:</b> <kbd>G</kbd> двигать · <kbd>R</kbd> вращать · <kbd>S</kbd> размер → потом <kbd>X</kbd>/<kbd>Y</kbd>/<kbd>Z</kbd> — по одной оси, <kbd>Shift</kbd> — точнее. Клик или <kbd>Enter</kbd> — готово, <kbd>Esc</kbd> или ПКМ — отмена. <kbd>Shift</kbd>+<kbd>D</kbd> — копия, <kbd>Delete</kbd> — удалить, <kbd>Enter</kbd> без действия — применить. Колесо над числом меняет его.</p>
       </div>
       <div class="row" id="shapeAllRow" hidden><button class="btn" id="sApplyAll">Применить все</button><label class="chip"><input type="checkbox" id="sGhost" checked><span class="dot" style="background:var(--accent)"></span>Показывать фигуры</label></div>
+      <label class="chip"><input type="checkbox" id="guidesOn" checked><span class="dot" style="background:#ffd24a"></span>Направляющие: центры, оси и края</label>
+      <p class="note">Серые пунктиры — центр и края модели, фиолетовые — оси симметрии, голубые — рамки и центры других фигур, оранжевые — выбранная фигура. <b style="color:#d4a017">Жёлтая линия</b> — её центр или край совпал с центром или краем другого объекта.</p>
     </section>
   </aside>
 </div>
@@ -151,9 +154,9 @@
 <script src="js/config.js"></script>
 <script src="js/common.js?v=1106"></script>
 <script src="js/temple.js?v=1106"></script>
-<script src="js/vox.js?v=1106"></script>
+<script src="js/vox.js?v=1108"></script>
 <script src="js/shapes.js?v=1106"></script>
 <script src="js/gizmo.js?v=1107"></script>
-<script src="js/structures.js?v=1107"></script>
+<script src="js/structures.js?v=1108"></script>
 </body>
 </html>

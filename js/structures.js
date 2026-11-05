@@ -11,7 +11,10 @@
   const SYMS = { none: { n: 1, mirror: false, axis: 'x' }, mx: { n: 1, mirror: true, axis: 'x' }, mz: { n: 1, mirror: true, axis: 'z' }, mxz: { n: 2, mirror: true, axis: 'x' }, r4: { n: 4, mirror: false, axis: 'x' },
     r4m: { n: 4, mirror: true, axis: 'x' }, r6m: { n: 6, mirror: true, axis: 'x' }, r8m: { n: 8, mirror: true, axis: 'x' }, r9m: { n: 9, mirror: true, axis: 'x' } };
   const symKey = s => { if (!s || (s.n <= 1 && !s.mirror)) return 'none'; for (const [k, v] of Object.entries(SYMS)) if (v && v.n === s.n && v.mirror === !!s.mirror && (!v.mirror || v.axis === (s.axis || 'x'))) return k; return 'none'; };
-  const symOf = d => { if (!d) return null; const s = d.sym || ((d.kind === 'temple' || d.kind === 'lotus') ? SYMS.r9m : null); return s && (s.n > 1 || s.mirror) ? s : null; };
+  // centre of the model: on the corner between 4 blocks when the box is even and centred (a 2×2 middle), else in the middle of block 0, 0
+  const autoC = () => (vox && vox.x0 * 2 + vox.w === 0 && vox.z0 * 2 + vox.d === 0) ? 0 : 0.5;
+  const symOf = d => { if (!d) return null; const s = d.sym || ((d.kind === 'temple' || d.kind === 'lotus') ? SYMS.r9m : null); if (!s || !(s.n > 1 || s.mirror)) return null; return s.c === 0 || s.c === 0.5 ? s : Object.assign({}, s, { c: autoC() }); };
+  const centreOf = d => { const s = d && d.sym; return s && (s.c === 0 || s.c === 0.5) ? s.c : autoC(); };
   let cur = null, vox = null, dirty = false, saveTimer = 0, saving = false;
   const undoS = [], redoS = [];
   const sel = { p1: null, p2: null };
@@ -61,7 +64,7 @@
     if (!isModel(d)) { d.w = Math.min(32, Math.max(1, Math.round(+$('dW').value || 1))); d.d = Math.min(32, Math.max(1, Math.round(+$('dD').value || 1))); d.h = Math.min(320, Math.max(1, Math.round(+$('dH').value || 8))); }
     App.save('structdefs'); renderList(); renderEditor(); if (!isModel(d)) loadCurrent(); App.toast('Сохранено');
   };
-  $('dSym').onchange = () => { const d = defOf(cur); if (!d) return; d.sym = SYMS[$('dSym').value] || SYMS.none; App.save('structdefs'); renderList(); drawGhosts(); App.toast(symOf(d) ? 'Симметрия включена: правки будут повторяться.' : 'Симметрия выключена'); };
+  $('dSym').onchange = () => { const d = defOf(cur); if (!d) return; d.sym = Object.assign({}, SYMS[$('dSym').value] || SYMS.none, { c: centreOf(d) }); App.save('structdefs'); renderList(); drawGhosts(); App.toast(symOf(d) ? 'Симметрия включена: правки будут повторяться.' : 'Симметрия выключена'); };
   let delArm = 0;
   $('dDel').onclick = () => {
     const d = defOf(cur); if (!d) return; const n = placed(d.id);
@@ -293,7 +296,8 @@
     try { const v = await VX.loadModel(d); if (cur !== d.id) return; vox = v ? v.clone() : null; }
     catch (e) { App.toast('Модель не загрузилась: ' + e.message, 6000); }
     finally { $('busy').hidden = true; }
-    pal.n = -1; rebuild(true); renderEditor(); renderPalette(); setState(''); hud(); selShape = null; xf = null; shapesChanged(true);
+    if (vox && d.sym && d.sym.c !== 0 && d.sym.c !== 0.5) d.sym = Object.assign({}, d.sym, { c: autoC() });   // remember the centre before the box grows
+    modelBB = null; pal.n = -1; rebuild(true); renderEditor(); renderPalette(); setState(''); hud(); selShape = null; xf = null; shapesChanged(true);
   }
 
   /* ================= changes: symmetry, growth, undo ================= */
@@ -328,7 +332,7 @@
     refreshAfter(rec, grow); markDirty(); return n;
   }
   function refreshAfter(rec, force) {
-    gridLater();
+    gridLater(); modelBB = null; guidesLater();
     const n = rec.length / 5; let ok = !force && n < 6000;
     if (ok) { for (let i = 0; i < rec.length && ok; i += 5) ok = touch(rec[i], rec[i + 1], rec[i + 2]); }
     if (ok) { flushView(); redraw(); } else rebuild();
@@ -649,6 +653,8 @@
   $('sApply').onclick = () => bakeShape(selShape); $('sDup').onclick = dupShape; $('sDel').onclick = () => removeShape(selShape);
   $('sApplyAll').onclick = () => { for (const q of shapes().filter(q => !q.hidden).slice()) bakeShape(q.id); };
   $('sGhost').onchange = drawGhosts;
+  $('guidesOn').checked = App.pref('struct.guides', true);
+  $('guidesOn').onchange = e => { App.setPref('struct.guides', e.target.checked); drawGhosts(); };
   $('sBlock').onclick = () => { const q = curShape(); if (!q) return; q.block = block(); shapesChanged(); };
   $('sName').oninput = () => { const q = curShape(); if (!q) return; q.name = $('sName').value.slice(0, 40); renderShapeList(); saveShapesLater(); };
   $('sMode').onchange = () => { const q = curShape(); if (!q) return; q.mode = $('sMode').value; shapesChanged(); };
@@ -680,12 +686,14 @@
     if (ghost) { scene.remove(ghost); ghost.geometry.dispose(); ghost.material.dispose(); ghost = null; }
     if (gizmo) { scene.remove(gizmo); gizmo.traverse(x => { if (x.geometry) x.geometry.dispose(); if (x.material) x.material.dispose(); }); gizmo = null; }
     ghostMap = new Map();
-    if (!vox || !$('sGhost').checked) { updateGiz(); redraw(); return; }
-    const list = [], sym = symActive() ? symOf(defOf(cur)) : null, acc = new THREE.Color(css('--accent') || '#e07b2a');
+    if (!vox || !$('sGhost').checked) { drawGuides(new Map()); updateGiz(); redraw(); return; }
+    const list = [], boxes = new Map(), sym = symActive() ? symOf(defOf(cur)) : null, acc = new THREE.Color(css('--accent') || '#e07b2a');
     for (const q of shapes()) {
       if (q.hidden) continue; const on = q.id === selShape, base = new THREE.Color(q.mode === 'cut' ? '#e74c3c' : VX.colorOf(q.block || block()));
       const col = on ? base.clone().lerp(acc, .35) : base, colM = base.clone().lerp(new THREE.Color('#ffffff'), .35);
+      const bb = { min: [1e9, 1e9, 1e9], max: [-1e9, -1e9, -1e9] }; boxes.set(q.id, bb);
       for (const [x, y, z] of SH.cells(q)) {
+        if (x < bb.min[0]) bb.min[0] = x; if (y < bb.min[1]) bb.min[1] = y; if (z < bb.min[2]) bb.min[2] = z; if (x + 1 > bb.max[0]) bb.max[0] = x + 1; if (y + 1 > bb.max[1]) bb.max[1] = y + 1; if (z + 1 > bb.max[2]) bb.max[2] = z + 1;
         ghostMap.set(x + ',' + y + ',' + z, q.id); list.push(x, y, z, col);
         if (sym) for (const [a, b] of VX.symImages(x, z, sym).slice(1)) list.push(a, y, b, colM);
       }
@@ -708,7 +716,66 @@
       gizmo = g; scene.add(g);
     }
     if (giz) { if (giz.active && q) giz.show(q.pos); else updateGiz(); }
-    redraw();
+    drawGuides(boxes); redraw();
+  }
+  /* guides: centre lines and outlines of the model and of every shape; while moving a shape, lines that match light up */
+  let guides = null, modelBB = null, guideQ = false, lastBoxes = new Map();
+  const guidesOn = () => $('guidesOn').checked;
+  function guidesLater() { if (guideQ) return; guideQ = true; requestAnimationFrame(() => { guideQ = false; drawGuides(lastBoxes); redraw(); }); }
+  function drawGuides(boxes) {
+    lastBoxes = boxes || new Map();
+    if (guides) { scene.remove(guides); guides.traverse(x => { if (x.geometry) x.geometry.dispose(); if (x.material) x.material.dispose(); }); guides = null; }
+    $('guideInfo').textContent = '';
+    if (!vox || !guidesOn()) return;
+    const d = defOf(cur), c = centreOf(d), g = new THREE.Group(), segs = { base: [], shape: [], sel: [], hit: [] };
+    if (!modelBB) modelBB = vox.bounds() || { x0: 0, x1: 0, y0: 0, y1: 0, z0: 0, z1: 0 };
+    const M = { min: [modelBB.x0, modelBB.y0, modelBB.z0], max: [modelBB.x1 + 1, modelBB.y1 + 1, modelBB.z1 + 1] };
+    const R = Math.max(16, ...[M.min[0], M.max[0], M.min[2], M.max[2]].map(v => Math.abs(v - c))) + 6, Ht = Math.max(8, M.max[1] + 6);
+    const L = (arr, a, b) => arr.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+    const boxL = (arr, mn, mx) => { const [x0, y0, z0] = mn, [x1, y1, z1] = mx;
+      for (const [y] of [[y0], [y1]]) { L(arr, [x0, y, z0], [x1, y, z0]); L(arr, [x1, y, z0], [x1, y, z1]); L(arr, [x1, y, z1], [x0, y, z1]); L(arr, [x0, y, z1], [x0, y, z0]); }
+      for (const [x, z] of [[x0, z0], [x1, z0], [x1, z1], [x0, z1]]) L(arr, [x, y0, z], [x, y1, z]); };
+    // the model: its centre (X and Z axes through it on the ground, a vertical axis), the outline of its blocks
+    L(segs.base, [c - R, 0.06, c], [c + R, 0.06, c]); L(segs.base, [c, 0.06, c - R], [c, 0.06, c + R]); L(segs.base, [c, 0, c], [c, Ht, c]);
+    boxL(segs.base, M.min, M.max);
+    // symmetry: mirror lines (or rays for turns only) on the ground
+    const sym = symOf(d), symSegs = [];
+    if (sym && sym.n > 1 || sym && sym.mirror) {
+      const n = sym.n || 1;
+      if (sym.mirror) for (let k = 0; k < n; k++) { const t = Math.PI * k / n + (sym.axis === 'z' ? Math.PI / 2 : 0), dx = Math.sin(t), dz = Math.cos(t); L(symSegs, [c - dx * R, 0.08, c - dz * R], [c + dx * R, 0.08, c + dz * R]); }
+      else for (let k = 0; k < n; k++) { const t = 2 * Math.PI * k / n; L(symSegs, [c, 0.08, c], [c + Math.sin(t) * R, 0.08, c + Math.cos(t) * R]); }
+    }
+    // shapes and the selected area
+    const objs = [{ id: 'model', name: 'модели', min: [c, 0, c], max: [c, 0, c], point: true }, { id: 'modelbox', name: 'модели', min: M.min, max: M.max }];
+    const b = selBox(); if (b && !(drag && drag.giz && !drag.giz.q)) objs.push({ id: 'area', name: 'выделения', min: [b.x0, b.y0, b.z0], max: [b.x1 + 1, b.y1 + 1, b.z1 + 1] });
+    let me = null;
+    for (const q of shapes()) { const bb = lastBoxes.get(q.id); if (!bb || bb.min[0] > bb.max[0]) continue;
+      const o = { id: q.id, name: '«' + q.name + '»', min: bb.min, max: bb.max, pos: q.pos };
+      const arr = q.id === selShape ? segs.sel : segs.shape; boxL(arr, o.min, o.max);
+      const p = q.pos, cy0 = Math.min(0, o.min[1]); L(arr, [p[0], cy0, p[2]], [p[0], o.max[1], p[2]]);               // vertical centre axis down to the ground
+      L(arr, [p[0] - 2, 0.07, p[2]], [p[0] + 2, 0.07, p[2]]); L(arr, [p[0], 0.07, p[2] - 2], [p[0], 0.07, p[2] + 2]);   // a cross on the ground under the centre
+      L(arr, [o.min[0], 0.05, o.min[2]], [o.max[0], 0.05, o.min[2]]); L(arr, [o.max[0], 0.05, o.min[2]], [o.max[0], 0.05, o.max[2]]); L(arr, [o.max[0], 0.05, o.max[2]], [o.min[0], 0.05, o.max[2]]); L(arr, [o.min[0], 0.05, o.max[2]], [o.min[0], 0.05, o.min[2]]);  // its footprint
+      if (q.id === selShape) me = o; else objs.push(o); }
+    // the selected shape: which of its edges / centre line up with the others (X, Y, Z)
+    const info = [];
+    if (me) {
+      const vals = o => [0, 1, 2].map(i => o.point ? [[o.min[i], 'центр']] : [[(o.min[i] + o.max[i]) / 2, 'центр'], [o.min[i], 'край'], [o.max[i], 'край']]);
+      const mid = o => [0, 1, 2].map(i => (o.min[i] + o.max[i]) / 2), mv = vals(me), mc = me.pos || mid(me);
+      for (const o of objs) { const ov = vals(o), oc = o.pos || mid(o);
+        for (let i = 0; i < 3; i++) { if (o.point && i === 1) continue; let done = false;
+          for (const [a, ka] of mv[i]) { for (const [bv, kb] of ov[i]) if (!done && Math.abs(a - bv) < 0.01) {
+            const p1 = mc.slice(), p2 = oc.slice(); p1[i] = p2[i] = a; L(segs.hit, p1, p2);
+            info.push(`${'XYZ'[i]} ${+a.toFixed(1)}: ${ka} = ${kb} ${o.name}`); done = true; } }
+        } }
+      const dc = [mc[0] - c, mc[2] - c]; info.unshift(`центр «${curShape().name}» от центра модели: X ${+dc[0].toFixed(1)} · Z ${+dc[1].toFixed(1)} · Y ${+mc[1].toFixed(1)}`);
+    }
+    const add = (arr, col, op, order, dashed) => { if (!arr.length) return; const ge = new THREE.BufferGeometry(); ge.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+      const ls = new THREE.LineSegments(ge, dashed ? new THREE.LineDashedMaterial({ color: col, dashSize: 1.2, gapSize: 0.8, depthTest: false, transparent: true, opacity: op }) : new THREE.LineBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: op }));
+      if (dashed) ls.computeLineDistances(); ls.renderOrder = order; g.add(ls); };
+    add(segs.base, 0x9aa3ab, 0.55, 6, true); add(symSegs, 0x8e7cc3, 0.6, 6, true); add(segs.shape, 0x6fb7d8, 0.75, 7, false);
+    add(segs.sel, new THREE.Color(css('--accent') || '#e07b2a'), 0.95, 8, false); add(segs.hit, 0xffd24a, 1, 9, false);
+    guides = g; scene.add(g);
+    $('guideInfo').innerHTML = info.slice(0, 5).map(t => `<span>${esc(t)}</span>`).join('');
   }
   function ghostAt(cx, cy) {
     if (!ghostMap.size) return null;

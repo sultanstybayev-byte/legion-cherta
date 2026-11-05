@@ -172,7 +172,7 @@ function cleanDefs(list) {
   return list.slice(0, 100).map(d => {
     const edits = Array.isArray(d.edits) ? d.edits.filter(e => Array.isArray(e) && e.length === 4 && e.every(Number.isFinite)).map(e => e.map(v => Math.trunc(v))) : [];
     total += edits.length; if (total > 200000) fail(413, 'Слишком много правок в структурах');
-    const sym = d.sym && typeof d.sym === 'object' ? { n: int(d.sym.n || 1, 'Симметрия', 1, 16), mirror: !!d.sym.mirror, axis: d.sym.axis === 'z' ? 'z' : 'x' } : null;
+    const sym = d.sym && typeof d.sym === 'object' ? { n: int(d.sym.n || 1, 'Симметрия', 1, 16), mirror: !!d.sym.mirror, axis: d.sym.axis === 'z' ? 'z' : 'x', c: d.sym.c === 0 ? 0 : 0.5 } : null;
     const v3 = (a, lo, hi, df) => [0, 1, 2].map(i => { const n = Number(Array.isArray(a) ? a[i] : NaN); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : df; });
     const shapes = (Array.isArray(d.shapes) ? d.shapes : []).slice(0, 200).filter(q => q && typeof q === 'object').map(q => ({
       id: str(q.id, 20, 'id фигуры') || String(now()), type: ['box', 'sphere', 'cyl', 'cone', 'torus', 'pyramid', 'petal'].includes(q.type) ? q.type : 'box', name: str(q.name, 40, 'Название фигуры'),

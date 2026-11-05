@@ -228,12 +228,15 @@
   /* ---------- symmetry ---------- */
   // images of a column (x, z) under the structure's symmetry: n rotations about the centre, optionally mirrored
   VX.symImages = function (x, z, sym) {
-    const n = sym && sym.n > 1 ? sym.n : 1, mir = !!(sym && sym.mirror), out = [], seen = new Set();
+    // sym.c: where the centre is — 0.5: in the middle of block 0, 0 (odd width); 0: on the corner between 4 blocks (even width, 2×2 middle)
+    const n = sym && sym.n > 1 ? sym.n : 1, mir = !!(sym && sym.mirror), c = sym && sym.c === 0 ? 0 : 0.5, out = [], seen = new Set();
     const add = (a, b, k, m) => { const key = a + ',' + b; if (!seen.has(key)) { seen.add(key); out.push([a, b, k, m]); } };
-    const srcs = mir ? (sym.axis === 'z' ? [[x, z, false], [x, -z, true]] : [[x, z, false], [-x, z, true]]) : [[x, z, false]];
-    for (const [sx, sz, m] of srcs) for (let k = 0; k < n; k++) {
-      if (n === 4 || n === 2) { let a = sx, b = sz; for (let t = 0; t < k * (4 / n); t++) [a, b] = [-b, a]; add(a, b, k * (4 / n), m); }
-      else { const t = 2 * Math.PI * k / n, c = Math.cos(t), s = Math.sin(t); add(Math.round(sx * c - sz * s), Math.round(sx * s + sz * c), -1, m); }
+    const u = x + 0.5 - c, v = z + 0.5 - c;           // block centre relative to the symmetry centre
+    const back = q => Math.round(q + c - 0.5);         // and back to a block index
+    const srcs = mir ? (sym.axis === 'z' ? [[u, v, false], [u, -v, true]] : [[u, v, false], [-u, v, true]]) : [[u, v, false]];
+    for (const [su, sv, m] of srcs) for (let k = 0; k < n; k++) {
+      if (n === 4 || n === 2) { let a = su, b = sv; for (let t = 0; t < k * (4 / n); t++) [a, b] = [-b, a]; add(back(a), back(b), k * (4 / n), m); }
+      else { const t = 2 * Math.PI * k / n, cs = Math.cos(t), sn = Math.sin(t); add(back(su * cs - sv * sn), back(su * sn + sv * cs), -1, m); }
     }
     return out;
   };
