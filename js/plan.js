@@ -267,7 +267,7 @@
     const s = list.find(q => q.id === selStruct), def = s && defOf(s.def);
     $('structEdit').hidden = !s || !CAN; $('structEdit').style.display = $('structEdit').hidden ? 'none' : 'flex';
     if (s && def) { const fp = App.footprint(def, s); $('structInfo').innerHTML = `<b>${esc(def.name)}</b><br>центр X ${sgn(Math.floor(fp.ox))} · Z ${sgn(Math.floor(fp.oz))}<br>чанки X ${sgn(App.chunkOf(fp.x0))}…${sgn(App.chunkOf(fp.x1 - 1))}, Z ${sgn(App.chunkOf(fp.z0))}…${sgn(App.chunkOf(fp.z1 - 1))}`; }
-    else $('structInfo').textContent = list.length ? (CAN ? 'Зажми структуру в 3D мышью и тяни — она переедет по чанкам. Клик по строке — выбрать.' : 'Клик по строке — показать.') : '';
+    else $('structInfo').textContent = list.length ? (CAN ? 'Структуры закреплены. Двигать — стрелками или включи «Двигать мышью». Клик по строке — выбрать.' : 'Клик по строке — показать.') : '';
   }
   function selectStruct(id, fly) {
     selStruct = id; drawSelBox(); renderStructs(); renderZones(); showTab('structs');
@@ -292,7 +292,7 @@
     if (!isModel(def) && cs.length !== 1) { cx -= Math.floor(def.w / 2); cz -= Math.floor(def.d / 2); }
     const s = { id: uid(), def: def.id, cx, cz, rot: 0 }; insts().push(s);
     App.save('structures'); syncStructures(); selectStruct(s.id, true);
-    App.toast(`«${def.name}» поставлена. Зажми её мышью и тяни, чтобы переставить.`);
+    App.toast(`«${def.name}» поставлена. Двигай стрелками или включи «Двигать мышью».`);
   };
   document.querySelectorAll('[data-smove]').forEach(btn => btn.onclick = () => {
     if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct); if (!s) return;
@@ -310,6 +310,8 @@
     if (Date.now() - sDelArm > 3000) { sDelArm = Date.now(); $('structDel').textContent = 'Точно убрать?'; return; }
     $('structDel').textContent = 'Убрать с платформы'; removeStruct(selStruct);
   };
+  $('dragMove').checked = App.pref('plan.dragMove', false);
+  $('dragMove').onchange = e => { App.setPref('plan.dragMove', e.target.checked); App.toast(e.target.checked ? 'Теперь структуру можно зажать в 3D и перетащить. Не забудь выключить.' : 'Структуры закреплены: мышь только крутит камеру.', 3500); };
   $('structHidden').checked = App.pref('plan.hidden', false);
   $('structHidden').onchange = e => { App.setPref('plan.hidden', e.target.checked); for (const o of meshes.values()) o.visible = !e.target.checked; redraw(); };
 
@@ -325,6 +327,7 @@
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   canvas.addEventListener('pointerdown', e => {
     canvas.focus({ preventScroll: true });
+    if (walk.on) { if (document.pointerLockElement !== canvas) lockMouse(); return; }
     if (e.pointerType === 'touch') { touches.set(e.pointerId, [e.clientX, e.clientY]); if (touches.size === 2) { const [a, b] = [...touches.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); } }
     canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, id: e.pointerId, t: Date.now(), moved: false, shift: e.shiftKey || e.ctrlKey || e.metaKey }; canvas.style.cursor = rectMode ? 'crosshair' : 'grabbing';
     if (rectMode && e.button === 0 && e.pointerType !== 'touch' || rectMode && e.pointerType === 'touch' && touches.size === 1) { const c = chunkAt(e.clientX, e.clientY); if (c) rect = { a: c, keep: drag.shift ? new Set(sel) : new Set() }; }
@@ -333,7 +336,7 @@
       if (h && h.s && isModel(defOf(h.s.def))) { drag.paint = { def: defOf(h.s.def), n: 0 }; paintAt(h, drag.paint); if (selStruct !== h.s.id) { selStruct = h.s.id; drawSelBox(); renderStructs(); renderZones(); showTab('structs'); } }
       else if (h && h.s) App.toast('Кистью красятся модели из блоков. Заготовки пока — просто цветные блоки.', 3500);
     }
-    else if (CAN && e.button === 0 && touches.size <= 1) {   // press on a structure: drag it over the chunks
+    else if (CAN && e.button === 0 && touches.size <= 1 && App.pref('plan.dragMove', false)) {   // press on a structure: drag it over the chunks
       const h = rayHit(e.clientX, e.clientY, true);
       if (h && h.s) { const p0 = planeAt(e.clientX, e.clientY, h.y + .5); if (p0) drag.struct = { s: h.s, cx: h.s.cx, cz: h.s.cz, y: h.y + .5, p0 }; }
     }
@@ -371,7 +374,7 @@
   };
   let hoverT = 0;
   canvas.addEventListener('pointermove', e => {
-    if (drag || !CAN || rectMode || brush.on || e.pointerType === 'touch' || !insts().length) return;
+    if (drag || walk.on || !CAN || rectMode || brush.on || !App.pref('plan.dragMove', false) || e.pointerType === 'touch' || !insts().length) return;
     const now = performance.now(); if (now - hoverT < 90) return; hoverT = now;
     canvas.style.cursor = rayHit(e.clientX, e.clientY, true) ? 'move' : 'grab';
   });
@@ -438,11 +441,12 @@
     storeZones(def); App.save('structdefs'); renderZones(); redraw();
   });
   $('rectBtn').onclick = () => { if (brush.on && !rectMode) setBrush(false); rectMode = !rectMode; $('rectBtn').setAttribute('aria-pressed', String(rectMode)); canvas.style.cursor = rectMode ? 'crosshair' : 'grab'; App.toast(rectMode ? 'Тяни мышью по платформе, чтобы выделить прямоугольник чанков. Shift — добавить к выбранным.' : 'Выделение рамкой выключено', 3500); };
-  canvas.addEventListener('wheel', e => { e.preventDefault(); move(0, 0, 0, -e.deltaY * 0.12); }, { passive: false });
+  canvas.addEventListener('wheel', e => { e.preventDefault(); if (walk.on) return; move(0, 0, 0, -e.deltaY * 0.12); }, { passive: false });
 
   const keys = new Set(); let kbRaf = 0, kbLast = 0;
   const KB = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
   canvas.addEventListener('keydown', e => {
+    if (walk.on) return;
     if (e.key === 'Escape') { sel.clear(); colorGround(); renderSel(); return; }
     if (!KB.includes(e.code)) return; e.preventDefault(); keys.add(e.code);
     if (!kbRaf) { kbLast = performance.now(); kbRaf = requestAnimationFrame(tick); }
@@ -458,6 +462,70 @@
     cam.pitch = Math.min(1.5707, Math.max(-1.5707, cam.pitch + ((k('ArrowUp') ? 1 : 0) - (k('ArrowDown') ? 1 : 0)) * 1.4 * dt));
     redraw(); kbRaf = requestAnimationFrame(tick);
   }
+
+  /* ---------- first-person walk, like in Minecraft: gravity, collisions with the blocks, mouse look ---------- */
+  const walk = { on: false, vx: 0, vy: 0, vz: 0, ground: false, fly: false, keys: new Set(), raf: 0, last: 0, saved: null, px: 0, py: 0, pz: 0 };
+  const EYE = 1.62, PW2 = 0.3, PH = 1.8, GRAV = 28, JUMP = 8.6;
+  const solidB = (x, y, z) => y < 0 || (!App.pref('plan.hidden', false) && !!solidAt(x, y, z));
+  function hits(px, py, pz) {
+    for (let x = Math.floor(px - PW2); x <= Math.floor(px + PW2 - 1e-6); x++) for (let z = Math.floor(pz - PW2); z <= Math.floor(pz + PW2 - 1e-6); z++)
+      for (let y = Math.floor(py); y <= Math.floor(py + PH - 1e-6); y++) if (solidB(x, y, z)) return true;
+    return false;
+  }
+  function lockMouse() { try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => { }); } catch (e) { } }
+  function startWalk() {
+    walk.saved = { ...cam }; walk.on = true; walk.fly = false; walk.vx = walk.vy = walk.vz = 0; walk.keys.clear();
+    // stand in front of the south entrance of the selected (or first) structure, looking north at it
+    const s = insts().find(q => q.id === selStruct) || insts().find(q => defOf(q.def)), def = s && defOf(s.def);
+    if (def) { const fp = App.footprint(def, s); walk.px = fp.ox + .5; walk.pz = fp.z1 + 4; walk.py = 0; cam.yaw = 0; cam.pitch = 0; }
+    else { walk.px = cam.x; walk.pz = cam.z; walk.py = 0; cam.pitch = 0; }
+    while (hits(walk.px, walk.py, walk.pz) && walk.py < 400) walk.py += 1;
+    $('walkBtn').textContent = 'Выйти (Esc)'; $('walkBtn').setAttribute('aria-pressed', 'true'); document.body.classList.add('walking');
+    $('hud').dataset.text = $('hud').dataset.text || $('hud').innerHTML;
+    $('hud').innerHTML = '<b>W</b><b>A</b><b>S</b><b>D</b> идти · <b>Space</b> прыжок · <b>Shift</b> бег · <b>F</b> полёт (Space/C — вверх/вниз) · мышь — смотреть · <b>Esc</b> — выйти · <span id="camPos"></span>';
+    if (brush.on) setBrush(false); if (rectMode) $('rectBtn').click();
+    for (const o of [...compass, ...labels]) o.visible = false; if (compassArrow) compassArrow.visible = false;
+    lockMouse(); canvas.focus(); walk.last = performance.now(); walk.raf = requestAnimationFrame(walkTick);
+  }
+  function stopWalk() {
+    if (!walk.on) return; walk.on = false; cancelAnimationFrame(walk.raf); walk.keys.clear();
+    if (document.pointerLockElement === canvas) document.exitPointerLock();
+    Object.assign(cam, walk.saved || {}); $('walkBtn').textContent = 'Войти внутрь'; $('walkBtn').setAttribute('aria-pressed', 'false'); document.body.classList.remove('walking');
+    for (const o of [...compass, ...labels]) o.visible = true; if (compassArrow) compassArrow.visible = true;
+    if ($('hud').dataset.text) $('hud').innerHTML = $('hud').dataset.text; redraw();
+  }
+  function walkTick(now) {
+    if (!walk.on) return;
+    const dt = Math.min(0.05, (now - walk.last) / 1000); walk.last = now; const k = c => walk.keys.has(c);
+    const f = (k('KeyW') || k('ArrowUp') ? 1 : 0) - (k('KeyS') || k('ArrowDown') ? 1 : 0), r = (k('KeyD') || k('ArrowRight') ? 1 : 0) - (k('KeyA') || k('ArrowLeft') ? 1 : 0);
+    const sp = walk.fly ? (k('ShiftLeft') || k('ShiftRight') ? 22 : 11) : (k('ShiftLeft') || k('ShiftRight') ? 5.6 : 4.3);
+    const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw), len = Math.hypot(f, r) || 1;
+    const vx = (-sy * f + cy * r) / len * sp, vz = (-cy * f - sy * r) / len * sp;
+    if (walk.fly) walk.vy = ((k('Space') ? 1 : 0) - (k('KeyC') || k('ControlLeft') ? 1 : 0)) * sp;
+    else { if (k('Space') && walk.ground) { walk.vy = JUMP; walk.ground = false; } walk.vy = Math.max(-60, walk.vy - GRAV * dt); }
+    // horizontal: one axis at a time; a one-block step is climbed on its own (like auto-jump)
+    for (const [ax, v] of [['px', vx * dt], ['pz', vz * dt]]) {
+      if (!v) continue; const old = walk[ax]; walk[ax] += v;
+      if (hits(walk.px, walk.py, walk.pz)) {
+        if (walk.ground && !hits(walk.px, walk.py + 1.05, walk.pz)) walk.py = Math.floor(walk.py + 1.05);
+        else walk[ax] = old;
+      }
+    }
+    const oy = walk.py; walk.py += walk.vy * dt; walk.ground = false;
+    if (hits(walk.px, walk.py, walk.pz)) { if (walk.vy < 0) { walk.py = Math.floor(walk.py) + 1; walk.ground = true; if (hits(walk.px, walk.py, walk.pz)) walk.py = oy; } else walk.py = oy; walk.vy = 0; }
+    cam.x = walk.px; cam.y = walk.py + EYE; cam.z = walk.pz; draw();
+    walk.raf = requestAnimationFrame(walkTick);
+  }
+  document.addEventListener('keydown', e => {
+    if (!walk.on) return;
+    if (e.code === 'Escape') { stopWalk(); return; }
+    if (e.code === 'KeyF') { walk.fly = !walk.fly; walk.vy = 0; App.toast(walk.fly ? 'Полёт: Space — вверх, C — вниз' : 'Полёт выключен', 1800); return; }
+    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ControlLeft', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) { e.preventDefault(); walk.keys.add(e.code); }
+  });
+  document.addEventListener('keyup', e => walk.keys.delete(e.code));
+  document.addEventListener('mousemove', e => { if (!walk.on || document.pointerLockElement !== canvas || performance.now() - (walk.lockedAt || 0) < 150 || Math.abs(e.movementX) > 250 || Math.abs(e.movementY) > 250) return; cam.yaw -= e.movementX * 0.0022; cam.pitch = Math.min(1.55, Math.max(-1.55, cam.pitch - e.movementY * 0.0022)); });
+  document.addEventListener('pointerlockchange', () => { if (walk.on && document.pointerLockElement !== canvas && walk.wasLocked) stopWalk(); walk.wasLocked = document.pointerLockElement === canvas; if (walk.wasLocked) walk.lockedAt = performance.now(); });
+  $('walkBtn').onclick = () => walk.on ? stopWalk() : startWalk();
 
   /* picking: walk the ray through base voxels, fall back to the ground plane */
   function chunkAt(clientX, clientY) {
@@ -593,7 +661,7 @@
   window.addEventListener('themechange', () => { colorGround(); redraw(); });
 
   if (!CAN) {
-    ['plApply', 'plCenter', 'placeRow', 'brushBtn'].forEach(id => $(id).hidden = true);
+    ['plApply', 'plCenter', 'placeRow', 'brushBtn', 'dragRow'].forEach(id => $(id).hidden = true);
     ['plSize', 'plCX', 'plCZ'].forEach(id => $(id).disabled = true);
     $('selInfo').insertAdjacentHTML('afterend', '<p class="note">Размечать чанки и ставить структуры могут модераторы. Ты можешь смотреть и выбирать чанки, чтобы прочитать задачу.</p>');
   }

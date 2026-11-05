@@ -18,6 +18,7 @@
       <button class="btn" id="rectBtn" aria-pressed="false">Выделить рамкой</button>
       <button class="btn" id="sideView">Обзор</button>
       <button class="btn" id="fullBtn">Во весь экран</button>
+      <button class="btn primary" id="walkBtn" aria-pressed="false">Войти внутрь</button>
       <button class="btn" id="brushBtn" aria-pressed="false">Кисть зон</button>
       <div class="brushbar" id="brushBar" hidden>
         <div class="swatches" id="brushSw"></div>
@@ -25,7 +26,8 @@
         <label class="note">Размер <select id="brushSize"><option value="1">4 блока</option><option value="2" selected>12 блоков</option><option value="3">20 блоков</option></select></label>
       </div>
     </div>
-    <div class="hud" id="hud"><b>W</b><b>A</b><b>S</b><b>D</b> лететь · <b>Space</b>/<b>C</b> вверх/вниз · <b>Shift</b> быстрее · мышь — смотреть · колесо — вперёд/назад<br>клик — чанк · <b>Shift</b>+клик — добавить · двойной клик — вся задача · зажми структуру и тяни — переставить · кисть: зажми на структуре и води · <span id="camPos"></span></div>
+    <div class="hud" id="hud"><b>W</b><b>A</b><b>S</b><b>D</b> лететь · <b>Space</b>/<b>C</b> вверх/вниз · <b>Shift</b> быстрее · мышь — смотреть · колесо — вперёд/назад<br>клик — чанк · <b>Shift</b>+клик — добавить · двойной клик — вся задача · «Войти внутрь» — ходить от первого лица · кисть: зажми на структуре и води · <span id="camPos"></span></div>
+    <div class="crosshair" aria-hidden="true"></div>
     <div class="banner" id="busy" hidden><h3>Считаю модель…</h3><p class="note">Большая структура, это пара секунд.</p></div>
   </main>
 
@@ -72,6 +74,7 @@
       </section>
       <section class="sec">
         <div class="row"><h2 class="grow">Поставленные структуры</h2><label class="chip"><input type="checkbox" id="structHidden"><span class="dot" style="background:var(--muted)"></span>Скрыть в 3D</label></div>
+        <div class="row" id="dragRow"><label class="chip"><input type="checkbox" id="dragMove"><span class="dot" style="background:var(--accent)"></span>Двигать мышью</label><span class="note grow">выключено — структуры не сдвинешь случайно</span></div>
         <p class="note mono" id="structInfo"></p>
         <div id="structEdit" hidden style="display:flex;flex-direction:column;gap:10px">
           <div class="row">

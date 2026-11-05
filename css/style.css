@@ -311,3 +311,9 @@ body.dragging,body.dragging *{cursor:grabbing!important;user-select:none}
 .toolbar .btn[aria-pressed="true"]{outline:2px solid var(--accent);outline-offset:-2px}
 .toolbar .btn[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg)}
 .brushbar label{display:flex;gap:6px;align-items:center;flex-direction:row;margin:0}
+/* planner: first-person walk */
+.crosshair{display:none;position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px 0 0 -9px;pointer-events:none;z-index:400}
+.crosshair::before,.crosshair::after{content:"";position:absolute;background:#fff;mix-blend-mode:difference}
+.crosshair::before{left:8px;top:0;width:2px;height:18px}.crosshair::after{top:8px;left:0;height:2px;width:18px}
+body.walking .crosshair{display:block}
+body.walking .toolbar>*:not(#walkBtn){display:none}

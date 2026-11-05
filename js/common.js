@@ -38,7 +38,7 @@
       structures: Array.isArray(p.structures) ? p.structures.filter(s => s && s.def) : [] };
     if (!Array.isArray(out.plan.base.edits)) out.plan.base.edits = [];
     // the main building is the Lotus Temple model; an old "Лотос Легиона" entry (kind lotus) turns into it, keeping its placements
-    const temple = id => ({ id, name: 'Храм Лотоса', kind: 'temple', edits: [], w: 11, d: 11, h: App.TEMPLE_H, color: '#e07b2a', note: 'Главное здание легиона по образцу Храма Лотоса в Дели: 27 лепестков, 9 входов. Внутри пока пусто, только пол.' });
+    const temple = id => ({ id, name: 'Храм Лотоса', kind: 'temple', edits: [], w: 8, d: 8, h: App.TEMPLE_H, color: '#e07b2a', note: 'Главное здание легиона по образцу Храма Лотоса в Дели: 27 лепестков, 9 входов. Внутри пока пусто, только пол.' });
     out.structdefs = Array.isArray(w.structdefs) && w.structdefs.length ? w.structdefs.map(d => d && d.kind === 'lotus' ? temple(d.id) : d) : [temple('lotus')];
     delete out.users;
     return out;
@@ -503,6 +503,6 @@
 
   /* shared constants */
   App.chunkOf = v => Math.floor(v / 16);
-  App.TEMPLE_N = 86; App.TEMPLE_H = 84;     // Храм Лотоса: centre block ± 86, 84 high (see js/temple.js)
+  App.TEMPLE_N = 63; App.TEMPLE_H = 61;     // Храм Лотоса: centre block ± 63, 61 high (see js/temple.js)
   window.App = App;
 })();
