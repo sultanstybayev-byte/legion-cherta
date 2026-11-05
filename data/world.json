@@ -2,18 +2,53 @@
  "version": 1,
  "name": "Мир легиона",
  "seed": "",
- "savedAt": 1,
+ "savedAt": 1793878795959,
  "maps": {
-  "overworld": { "image": "", "x": 0, "z": 0, "bpp": 1 },
-  "nether": { "image": "", "x": 0, "z": 0, "bpp": 1 },
-  "end": { "image": "", "x": 0, "z": 0, "bpp": 1 }
+  "overworld": {
+   "image": "",
+   "x": 0,
+   "z": 0,
+   "bpp": 1
+  },
+  "nether": {
+   "image": "",
+   "x": 0,
+   "z": 0,
+   "bpp": 1
+  },
+  "end": {
+   "image": "",
+   "x": 0,
+   "z": 0,
+   "bpp": 1
+  }
  },
  "markers": [
-  { "id": "spawn", "name": "Точка появления", "cat": "other", "x": 0, "y": null, "z": 0, "dim": "overworld", "note": "Пример метки. Её можно изменить или удалить.", "created": 1 }
+  {
+   "id": "spawn",
+   "name": "Точка появления",
+   "cat": "other",
+   "x": 0,
+   "y": null,
+   "z": 0,
+   "dim": "overworld",
+   "note": "Пример метки. Её можно изменить или удалить.",
+   "created": 1
+  }
  ],
  "plan": {
-  "platform": { "size": 16, "cx0": -8, "cz0": -8 },
-  "base": { "placed": true, "scale": 1, "cx": 0, "cz": 0, "edits": [] },
+  "platform": {
+   "size": 16,
+   "cx0": -8,
+   "cz0": -8
+  },
+  "base": {
+   "placed": true,
+   "scale": 1,
+   "cx": 0,
+   "cz": 0,
+   "edits": []
+  },
   "tasks": []
  }
 }
