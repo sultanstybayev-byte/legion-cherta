@@ -8,6 +8,14 @@
   const showTab = App.tabs(document.querySelector('.side'), () => setTimeout(resize, 0));
   const deny = () => { App.toast(App.user ? 'План меняют модераторы. Ты можешь смотреть.' : 'Войди через Telegram. План меняют модераторы.', 4000); return true; };
   const W = () => App.world, P = () => App.world.plan;
+  /* undo / redo for everything changed here: placing, moving, turning, removing structures, zone paint, tasks.
+     Every save() compares the plan with the last saved state and remembers the difference. */
+  const undoP = [], redoP = []; let lastSnap = null, restoring = false;
+  const snapP = () => JSON.stringify({ s: P().structures, t: P().tasks, z: (W().structdefs || []).filter(d => VX.isModel(d)).map(d => [d.id, d.zones || [], d.zoneC || 4, d.zoneNames || {}]) });
+  function save(kind) {
+    if (!restoring && ['structures', 'tasks', 'structdefs'].includes(kind)) { const now = snapP(); if (lastSnap != null && now !== lastSnap) { undoP.push([lastSnap, now]); if (undoP.length > 40) undoP.shift(); redoP.length = 0; } lastSnap = now; }
+    App.save(kind);
+  }
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const MATS = { 1: '#8b8f8e', 2: '#d9d9d3', 3: '#f3ede4', 4: '#e0782b', 5: '#a3a5a9', 6: '#3c68c9', 7: '#a9d9cf', 8: '#e9b85a', 9: '#e6edf0', 10: '#e9ebec', 11: '#4d7482' };
   const isModel = VX.isModel;
@@ -178,9 +186,9 @@
     const out = { vox, L: { get: (x, y, z) => vox.get(x, y, z), inside: (x, y, z) => vox.inside(x, y, z), H: b ? b.y1 + 1 : 1 }, n, cap: Math.max(1, n), mat, col, pos: sf.pos, cells: null };
     lotusCache.set(def.id, out); return out;
   }
-  function cellsOf(c) {
-    if (c.cells) return c.cells; const m = c.cells = new Map();
-    for (let i = 0; i < c.n; i++) { const k = cellKey(c.pos[3 * i], c.pos[3 * i + 1], c.pos[3 * i + 2]); let a = m.get(k); if (!a) m.set(k, a = []); a.push(i); }
+  function cellsOf(c, zs) {
+    const f = zs === 1 ? 'cells1' : 'cells'; if (c[f]) return c[f]; const m = c[f] = new Map();
+    for (let i = 0; i < c.n; i++) { const k = cellKey(c.pos[3 * i], c.pos[3 * i + 1], c.pos[3 * i + 2], zs); let a = m.get(k); if (!a) m.set(k, a = []); a.push(i); }
     return m;
   }
   function uploadMesh(def, m) {
@@ -189,9 +197,10 @@
   }
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 
-  /* ---------- zones painted on a model with the brush: cubes of ZC×ZC×ZC blocks, stored on the structure ---------- */
-  const ZC = 4, ZONE_COLORS = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c', '#3498db', '#9b59b6', '#e84393', '#795548', '#34495e'];
-  const cellKey = (x, y, z) => Math.floor(x / ZC) + ',' + Math.floor(y / ZC) + ',' + Math.floor(z / ZC);
+  /* ---------- zones painted on a model with the brush: the visible surface, block by block (zoneC 1); old plans used cubes of 4×4×4 ---------- */
+  const ZONE_COLORS = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c', '#3498db', '#9b59b6', '#e84393', '#795548', '#34495e'];
+  const zoneSize = def => def.zoneC === 1 ? 1 : 4;
+  const cellKey = (x, y, z, zs) => zs === 1 ? x + ',' + y + ',' + z : Math.floor(x / 4) + ',' + Math.floor(y / 4) + ',' + Math.floor(z / 4);
   const zoneMaps = new WeakMap();
   function zonesOf(def) { let m = zoneMaps.get(def); if (!m) { m = new Map(); for (const z of def.zones || []) if (Array.isArray(z) && z.length === 4) m.set(z[0] + ',' + z[1] + ',' + z[2], z[3] | 0); zoneMaps.set(def, m); } return m; }
   function storeZones(def) { def.zones = [...zonesOf(def)].map(([k, c]) => [...k.split(',').map(Number), c]); }
@@ -200,7 +209,7 @@
     const c = lotusCache.get(def.id); if (!c || !mesh.instanceColor) return;
     const zm = zonesOf(def), arr = mesh.instanceColor.array; if (!keys) arr.set(c.col.subarray(0, c.n * 3));
     const one = (ck, idx) => { const z = zm.get(ck); for (const i of idx) { bc.setRGB(c.col[3 * i], c.col[3 * i + 1], c.col[3 * i + 2]); if (z != null) bc.lerp(zc.set(ZONE_COLORS[z] || '#ff00ff'), .78); arr[3 * i] = bc.r; arr[3 * i + 1] = bc.g; arr[3 * i + 2] = bc.b; } };
-    const cells = cellsOf(c); if (keys) { for (const k of keys) { const idx = cells.get(k); if (idx) one(k, idx); } } else for (const [k, idx] of cells) if (zm.has(k)) one(k, idx);
+    const cells = cellsOf(c, zoneSize(def)); if (keys) { for (const k of keys) { const idx = cells.get(k); if (idx) one(k, idx); } } else for (const [k, idx] of cells) if (zm.has(k)) one(k, idx);
     mesh.instanceColor.needsUpdate = true;
   }
   function makeMesh(def, s) {
@@ -240,7 +249,7 @@
     const fp = App.footprint(def, s), h = heightOf(def), dy = s.dy || 0;
     selBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(fp.x1 - fp.x0, h + 1, fp.z1 - fp.z0)), new THREE.LineBasicMaterial({ color: new THREE.Color(css('--accent') || '#e07b2a'), depthTest: false }));
     selBox.position.set((fp.x0 + fp.x1) / 2, dy + (h + 1) / 2, (fp.z0 + fp.z1) / 2); selBox.renderOrder = 6; scene.add(selBox);
-    if (giz) { if (CAN && !walk.on && !App.pref('plan.hidden', false)) giz.show(gizPos(def, s)); else giz.hide(); }
+    if (giz) { if (CAN && !walk.on && !brush.on && !rectMode && !App.pref('plan.hidden', false)) giz.show(gizPos(def, s)); else giz.hide(); }
   }
   const heightOf = def => isModel(def) ? (lotusCache.get(def.id) || { L: { H: 80 } }).L.H : def.h;
   const gizPos = (def, s) => { const fp = App.footprint(def, s); return [isModel(def) ? fp.ox : (fp.x0 + fp.x1) / 2, (s.dy || 0) + heightOf(def) + 2, isModel(def) ? fp.oz : (fp.z0 + fp.z1) / 2]; };
@@ -315,7 +324,7 @@
     redraw();
   }
   let rowDelArm = { id: null, t: 0 };
-  function removeStruct(id) { P().structures = insts().filter(q => q.id !== id); if (selStruct === id) selStruct = null; App.save('structures'); syncStructures(); }
+  function removeStruct(id) { P().structures = insts().filter(q => q.id !== id); if (selStruct === id) selStruct = null; save('structures'); syncStructures(); }
   $('placedList').addEventListener('click', e => {
     const del = e.target.closest('[data-sdel]');
     if (del) { e.stopPropagation(); if (!CAN && deny()) return; const id = del.dataset.sdel;
@@ -330,25 +339,25 @@
     let cx = cs.length === 1 ? cs[0][0] : pl.cx0 + Math.floor(pl.size / 2), cz = cs.length === 1 ? cs[0][1] : pl.cz0 + Math.floor(pl.size / 2);
     if (!isModel(def) && cs.length !== 1) { cx -= Math.floor(def.w / 2); cz -= Math.floor(def.d / 2); }
     const s = { id: uid(), def: def.id, cx, cz, rot: 0 }; insts().push(s);
-    App.save('structures'); syncStructures(); selectStruct(s.id, true);
+    save('structures'); syncStructures(); selectStruct(s.id, true);
     App.toast(`«${def.name}» поставлена. Двигай стрелками или включи «Двигать мышью».`);
   };
   document.querySelectorAll('[data-smove]').forEach(btn => btn.onclick = () => {
     if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct); if (!s) return;
-    const [dx, dz] = btn.dataset.smove.split(',').map(Number); s.cx += dx; s.cz += dz; App.save('structures'); syncStructures();
+    const [dx, dz] = btn.dataset.smove.split(',').map(Number); s.cx += dx; s.cz += dz; save('structures'); syncStructures();
   });
-  $('structRot').onclick = () => { if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct); if (!s) return; s.rot = ((s.rot || 0) + 1) % 4; App.save('structures'); syncStructures(); };
+  $('structRot').onclick = () => { if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct); if (!s) return; s.rot = ((s.rot || 0) + 1) % 4; save('structures'); syncStructures(); };
   $('structToSel').onclick = () => {
     if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct); const cs = selChunks();
     if (!s) return; if (cs.length !== 1) { App.toast('Выбери на платформе один чанк — туда встанет структура'); return; }
-    s.cx = cs[0][0]; s.cz = cs[0][1]; s.dx = 0; s.dz = 0; App.save('structures'); syncStructures();
+    s.cx = cs[0][0]; s.cz = cs[0][1]; s.dx = 0; s.dz = 0; save('structures'); syncStructures();
   };
   $('structCentre').onclick = () => {
     if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
     const fp = App.footprint(def, s), [pcx, pcz] = platformCentre(), ddx = Math.round(pcx - (fp.x0 + fp.x1) / 2), ddz = Math.round(pcz - (fp.z0 + fp.z1) / 2);
     // the structure's centre (the 2×2 middle) always lands in the middle of a chunk: block 8 of the chunk, like every model
     s.cx += Math.round(ddx / 16); s.cz += Math.round(ddz / 16); s.dx = 0; s.dz = 0;
-    App.save('structures'); syncStructures();
+    save('structures'); syncStructures();
     const f2 = App.footprint(def, s), ox = (f2.x0 + f2.x1) / 2 - pcx, oz = (f2.z0 + f2.z1) / 2 - pcz, pl = P().platform;
     App.toast(!ox && !oz ? 'Ровно по центру платформы, центр структуры — в середине чанка'
       : `Центр структуры — в середине чанка; от центра платформы X ${fmtOff(ox)} · Z ${fmtOff(oz)}.${pl.size % 2 === 0 && isModel(def) ? ' У платформы плана чётное число чанков (' + pl.size + '), её центр на углу чанка. Сделай её нечётной (например ' + (pl.size + 1) + ') во вкладке «Платформа» — и будет ровно.' : ''}`, 7000);
@@ -357,7 +366,7 @@
   function posOf(s, def) { const fp = App.footprint(def, s), [pcx, pcz] = platformCentre(); return [(fp.x0 + fp.x1) / 2 - pcx, s.dy || 0, (fp.z0 + fp.z1) / 2 - pcz]; }
   function fillPosInputs(s, def) { const p = posOf(s, def); ['posX', 'posY', 'posZ'].forEach((id, i) => { if (document.activeElement !== $(id)) $(id).value = String(p[i]); }); $('posX').step = $('posZ').step = isModel(def) ? '1' : '16'; }
   function movedLive(s, def) { const o = meshes.get(s.id); if (o) placeMesh(o, def, s); drawSelBox(); redraw(); }
-  function movedDone(s, def) { buildSurfGrid(); App.save('structures'); renderStructs(); }
+  function movedDone(s, def) { buildSurfGrid(); save('structures'); renderStructs(); }
   ['posX', 'posY', 'posZ'].forEach((id, i) => $(id).addEventListener('change', () => {
     if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
     const v = Math.round(+$(id).value); if (!Number.isFinite(v)) return; const p = posOf(s, def), fp = App.footprint(def, s);
@@ -393,7 +402,7 @@
     if (walk.on) { if (document.pointerLockElement !== canvas) lockMouse(); return; }
     if (e.pointerType === 'touch') { touches.set(e.pointerId, [e.clientX, e.clientY]); if (touches.size === 2) { const [a, b] = [...touches.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); } }
     canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, id: e.pointerId, t: Date.now(), moved: false, shift: e.shiftKey || e.ctrlKey || e.metaKey }; canvas.style.cursor = rectMode ? 'crosshair' : 'grabbing';
-    const gAxis = giz && CAN && e.button === 0 && touches.size <= 1 ? giz.pick(camera, canvas, e.clientX, e.clientY) : -1;
+    const gAxis = giz && CAN && !brush.on && !rectMode && e.button === 0 && touches.size <= 1 ? giz.pick(camera, canvas, e.clientX, e.clientY) : -1;
     if (gAxis >= 0) {   // drag an arrow: move the selected structure along X, Y or Z
       const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def);
       if (def) { const fp = App.footprint(def, s); drag.giz = { axis: gAxis, s, def, ox: isModel(def) ? fp.ox : (fp.x0 + fp.x1) / 2, oz: isModel(def) ? fp.oz : (fp.z0 + fp.z1) / 2, dy: s.dy || 0, cx: s.cx, cz: s.cz, dx: s.dx || 0, dz: s.dz || 0, last: 0 };
@@ -447,8 +456,8 @@
     const wasRect = rect && d.moved; rect = null;
     if (wasRect) { renderSel(); return; }
     if (d.giz) { giz.end(); const g = d.giz; if (g.last) { movedDone(g.s, g.def); App.toast(`Сдвинуто по ${'XYZ'[g.axis]} на ${g.last > 0 ? '+' : ''}${g.last} бл.`, 1800); } else renderStructs(); drawSelBox(); redraw(); return; }
-    if (d.paint) { if (d.paint.n) { storeZones(d.paint.def); App.save('structdefs'); renderZones(); } return; }
-    if (d.struct && d.moved) { const st = d.struct; if (st.s.cx !== st.cx || st.s.cz !== st.cz) { buildSurfGrid(); App.save('structures'); App.toast(`Перенесено на ${sgn(st.s.cx - st.cx)}, ${sgn(st.s.cz - st.cz)} чанк.`); } renderStructs(); return; }
+    if (d.paint) { if (d.paint.n) { storeZones(d.paint.def); save('structdefs'); renderZones(); } return; }
+    if (d.struct && d.moved) { const st = d.struct; if (st.s.cx !== st.cx || st.s.cz !== st.cz) { buildSurfGrid(); save('structures'); App.toast(`Перенесено на ${sgn(st.s.cx - st.cx)}, ${sgn(st.s.cz - st.cz)} чанк.`); } renderStructs(); return; }
     if (!d.moved && Date.now() - d.t < 600 && e.button !== 2) pickAt(e.clientX, e.clientY, d.shift);
   };
   let hoverT = 0;
@@ -476,14 +485,30 @@
   }
   /* brush */
   const brush = { on: false, color: 0, erase: false, size: 1 };
+  // paint what is seen: surface blocks around the hit block (within the brush radius, connected to it) that have a face turned to the camera
   function paintAt(h, st) {
-    const s = h.s, def = defOf(s.def), fp = App.footprint(def, s), a = (s.rot || 0) * Math.PI / 2, wx = h.x + .5 - fp.ox, wz = h.z + .5 - fp.oz;
-    const lx = Math.floor(wx * Math.cos(a) + wz * Math.sin(a) + 1e-6), lz = Math.floor(-wx * Math.sin(a) + wz * Math.cos(a) + 1e-6);
-    const cx = Math.floor(lx / ZC), cy = Math.floor(h.y / ZC), cz = Math.floor(lz / ZC), R = brush.size - 1, zm = zonesOf(def), keys = [];
-    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) for (let dz = -R; dz <= R; dz++) {
-      if (dx * dx + dy * dy + dz * dz > R * R + .5) continue;
-      const k = (cx + dx) + ',' + (cy + dy) + ',' + (cz + dz);
+    const s = h.s, def = defOf(s.def), c = lotusCache.get(def.id); if (!c) return;
+    if (def.zoneC !== 1) {   // old 4×4×4 zones → the surface blocks inside them
+      const old = zonesOf(def), nm = new Map(); for (let i = 0; i < c.n; i++) { const z = old.get(cellKey(c.pos[3 * i], c.pos[3 * i + 1], c.pos[3 * i + 2], 4)); if (z != null) nm.set(c.pos[3 * i] + ',' + c.pos[3 * i + 1] + ',' + c.pos[3 * i + 2], z); }
+      def.zoneC = 1; zoneMaps.set(def, nm);
+    }
+    const fp = App.footprint(def, s), a = (s.rot || 0) * Math.PI / 2, ca = Math.cos(a), sa = Math.sin(a), dy = s.dy || 0;
+    const toL = (wx, wz) => [wx * ca + wz * sa, -wx * sa + wz * ca];
+    const [lxf, lzf] = toL(h.x + .5 - fp.ox, h.z + .5 - fp.oz), hx = Math.floor(lxf + 1e-6), hz = Math.floor(lzf + 1e-6), hy = h.y - dy;
+    let [vx, vz] = toL(cam.x - (h.x + .5), cam.z - (h.z + .5)), vy = cam.y - (h.y + .5); const vl = Math.hypot(vx, vy, vz) || 1; vx /= vl; vy /= vl; vz /= vl;
+    const L = c.L, R = brush.size, zm = zonesOf(def), keys = [], seen = new Set();
+    const D6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+    const seenFace = (x, y, z) => D6.some(([p, q, r]) => !L.get(x + p, y + q, z + r) && p * vx + q * vy + r * vz > 0.15);
+    const stack = [[hx, hy, hz]]; seen.add(hx + ',' + hy + ',' + hz);
+    while (stack.length) {
+      const [x, y, z] = stack.pop(), k = x + ',' + y + ',' + z;
       if (brush.erase) { if (zm.delete(k)) keys.push(k); } else if (zm.get(k) !== brush.color) { zm.set(k, brush.color); keys.push(k); }
+      if (!R) break;
+      for (let p = -1; p <= 1; p++) for (let q = -1; q <= 1; q++) for (let r = -1; r <= 1; r++) {
+        const X = x + p, Y = y + q, Z = z + r, kk = X + ',' + Y + ',' + Z; if (seen.has(kk)) continue; seen.add(kk);
+        if ((X - hx) ** 2 + (Y - hy) ** 2 + (Z - hz) ** 2 > R * R + .5 || !L.get(X, Y, Z) || !seenFace(X, Y, Z)) continue;
+        stack.push([X, Y, Z]);
+      }
     }
     if (!keys.length) return; st.n += keys.length;
     for (const o of meshes.values()) if (o.userData.def === def.id) recolor(def, o, keys);
@@ -492,8 +517,8 @@
   function setBrush(on) {
     brush.on = on; $('brushBtn').setAttribute('aria-pressed', String(on)); $('brushBar').hidden = !on;
     if (on && rectMode) $('rectBtn').click();
-    canvas.style.cursor = on ? 'crosshair' : 'grab';
-    if (on) App.toast('Зажми мышь на структуре и води — зона закрашивается кубами 4×4×4. Мимо структуры — обычный обзор.', 4500);
+    canvas.style.cursor = on ? 'crosshair' : 'grab'; drawSelBox(); redraw();
+    if (on) App.toast('Зажми мышь на структуре и води — красится видимая поверхность, как краской. Мимо структуры — обычный обзор. Ctrl+Z — отменить.', 4500);
   }
   $('brushBtn').onclick = () => { if (!CAN && deny()) return; setBrush(!brush.on); };
   $('brushSw').innerHTML = ZONE_COLORS.map((c, i) => `<button type="button" style="background:${c}" data-zi="${i}" aria-label="Зона ${i + 1}"></button>`).join('');
@@ -510,21 +535,21 @@
     const zm = zonesOf(def), cnt = new Map(); for (const c of zm.values()) cnt.set(c, (cnt.get(c) || 0) + 1);
     $('zoneSec').hidden = false;
     box.innerHTML = cnt.size ? [...cnt].sort((a, b) => a[0] - b[0]).map(([c, n]) => `<div class="row" style="gap:8px"><span style="width:18px;height:18px;border-radius:5px;background:${ZONE_COLORS[c]};flex:none"></span>
-      <input type="text" class="grow" data-zname="${c}" maxlength="40" value="${esc((def.zoneNames || {})[c] || '')}" placeholder="Зона ${c + 1}" ${CAN ? '' : 'disabled'}><span class="note mono">${n} куб.</span>
+      <input type="text" class="grow" data-zname="${c}" maxlength="40" value="${esc((def.zoneNames || {})[c] || '')}" placeholder="Зона ${c + 1}" ${CAN ? '' : 'disabled'}><span class="note mono">${n} ${zoneSize(def) === 1 ? 'бл.' : 'куб.'}</span>
       ${CAN ? `<button class="btn sm" data-zclear="${c}" title="Стереть зону">✕</button>` : ''}</div>`).join('')
       : `<p class="note">Зон пока нет. ${CAN ? 'Включи «Кисть» сверху над 3D, выбери цвет и води по структуре.' : ''}</p>`;
   }
   $('zoneList').addEventListener('change', e => {
     const i = e.target.closest('[data-zname]'); if (!i) return; const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
-    def.zoneNames = Object.assign({}, def.zoneNames, { [i.dataset.zname]: i.value.trim() }); App.save('structdefs');
+    def.zoneNames = Object.assign({}, def.zoneNames, { [i.dataset.zname]: i.value.trim() }); save('structdefs');
   });
   $('zoneList').addEventListener('click', e => {
     const b = e.target.closest('[data-zclear]'); if (!b) return; const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
     const c = +b.dataset.zclear, zm = zonesOf(def), keys = []; for (const [k, v] of zm) if (v === c) { zm.delete(k); keys.push(k); }
     for (const o of meshes.values()) if (o.userData.def === def.id) recolor(def, o, keys);
-    storeZones(def); App.save('structdefs'); renderZones(); redraw();
+    storeZones(def); save('structdefs'); renderZones(); redraw();
   });
-  $('rectBtn').onclick = () => { if (brush.on && !rectMode) setBrush(false); rectMode = !rectMode; $('rectBtn').setAttribute('aria-pressed', String(rectMode)); canvas.style.cursor = rectMode ? 'crosshair' : 'grab'; App.toast(rectMode ? 'Тяни мышью по платформе, чтобы выделить прямоугольник чанков. Shift — добавить к выбранным.' : 'Выделение рамкой выключено', 3500); };
+  $('rectBtn').onclick = () => { if (brush.on && !rectMode) setBrush(false); rectMode = !rectMode; $('rectBtn').setAttribute('aria-pressed', String(rectMode)); drawSelBox(); redraw(); canvas.style.cursor = rectMode ? 'crosshair' : 'grab'; App.toast(rectMode ? 'Тяни мышью по платформе, чтобы выделить прямоугольник чанков. Shift — добавить к выбранным.' : 'Выделение рамкой выключено', 3500); };
   canvas.addEventListener('wheel', e => { e.preventDefault(); if (walk.on) return; move(0, 0, 0, -e.deltaY * 0.12); }, { passive: false });
 
   const keys = new Set(); let kbRaf = 0, kbLast = 0;
@@ -650,7 +675,7 @@
     if (cx < pl.cx0 || cz < pl.cz0 || cx >= pl.cx0 + pl.size || cz >= pl.cz0 + pl.size) { if (!add) { sel.clear(); colorGround(); renderSel(); } return; }
     const k = key(cx, cz);
     if (add) { sel.has(k) ? sel.delete(k) : sel.add(k); } else { const only = sel.size === 1 && sel.has(k); sel.clear(); if (!only) sel.add(k); }
-    colorGround(); renderSel(); showTab('tasks');
+    colorGround(); renderSel();   // the tab stays where it is (the selected-chunk count shows on the «Задачи» tab)
   }
 
   /* ---------- selection & tasks UI ---------- */
@@ -663,7 +688,7 @@
   function selChunks() { return [...sel].map(k => k.split(',').map(Number)); }
   function renderSel() {
     const cs = selChunks();
-    $('selCount').textContent = cs.length ? `${cs.length}` : '';
+    $('selCount').textContent = cs.length ? `${cs.length}` : ''; $('taskCount').textContent = cs.length ? `выбрано ${cs.length}` : (P().tasks.length ? String(P().tasks.length) : '');
     $('selEdit').hidden = !cs.length || !CAN; $('selEdit').style.display = $('selEdit').hidden ? 'none' : 'flex';
     if (!cs.length) { $('selInfo').textContent = 'Кликни по чанку. Shift+клик — добавить ещё, «Выделить рамкой» — сразу прямоугольник, двойной клик — вся задача.'; return; }
     const xs = cs.map(c => c[0]), zs = cs.map(c => c[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
@@ -704,9 +729,9 @@
     t.name = name; t.color = pickColor; t.note = $('taskNote').value.trim();
     t.chunks.push(...cs);
     P().tasks = P().tasks.filter(q => q.chunks.length);
-    App.save('tasks'); colorGround(); renderSel(); renderTasks(); App.toast(`«${name}»: ${t.chunks.length} чанк.`);
+    save('tasks'); colorGround(); renderSel(); renderTasks(); App.toast(`«${name}»: ${t.chunks.length} чанк.`);
   };
-  $('unassignBtn').onclick = () => { dropChunks(selChunks()); P().tasks = P().tasks.filter(q => q.chunks.length); App.save('tasks'); colorGround(); renderSel(); renderTasks(); };
+  $('unassignBtn').onclick = () => { dropChunks(selChunks()); P().tasks = P().tasks.filter(q => q.chunks.length); save('tasks'); colorGround(); renderSel(); renderTasks(); };
   $('clearSel').onclick = () => { sel.clear(); colorGround(); renderSel(); };
   function renderTasks() {
     const ts = P().tasks; $('taskCount').textContent = ts.length ? String(ts.length) : '';
@@ -718,7 +743,7 @@
     const del = e.target.closest('[data-del]');
     if (del) { e.stopPropagation(); if (!CAN && deny()) return; const id = del.dataset.del;
       if (delArm.id !== id || Date.now() - delArm.t > 3000) { delArm = { id, t: Date.now() }; del.textContent = 'Точно?'; return; }
-      P().tasks = P().tasks.filter(t => t.id !== id); App.save('tasks'); colorGround(); renderSel(); renderTasks(); return; }
+      P().tasks = P().tasks.filter(t => t.id !== id); save('tasks'); colorGround(); renderSel(); renderTasks(); return; }
     const it = e.target.closest('.item'); if (!it) return;
     const t = P().tasks.find(q => q.id === it.dataset.id); if (!t) return;
     sel.clear(); for (const [cx, cz] of t.chunks) sel.add(key(cx, cz)); colorGround(); renderSel();
@@ -731,8 +756,8 @@
   /* ---------- platform panel ---------- */
   function renderPlatform() { const pl = P().platform; $('plSize').value = pl.size; $('plCX').value = pl.cx0; $('plCZ').value = pl.cz0;
     $('plInfo').innerHTML = `${pl.size}×${pl.size} чанков = ${pl.size * 16}×${pl.size * 16} блоков<br>X ${sgn(pl.cx0 * 16)}…${sgn((pl.cx0 + pl.size) * 16 - 1)}, Z ${sgn(pl.cz0 * 16)}…${sgn((pl.cz0 + pl.size) * 16 - 1)}`; }
-  $('plApply').onclick = () => { if (!CAN && deny()) return; const pl = P().platform; pl.size = Math.min(48, Math.max(8, Math.round(+$('plSize').value || 16))); pl.cx0 = Math.round(+$('plCX').value || 0); pl.cz0 = Math.round(+$('plCZ').value || 0); App.save('platform'); refreshAll(); };
-  $('plCenter').onclick = () => { if (!CAN && deny()) return; const pl = P().platform; pl.cx0 = -Math.floor(pl.size / 2); pl.cz0 = -Math.floor(pl.size / 2); App.save('platform'); refreshAll(); };
+  $('plApply').onclick = () => { if (!CAN && deny()) return; const pl = P().platform; pl.size = Math.min(48, Math.max(8, Math.round(+$('plSize').value || 16))); pl.cx0 = Math.round(+$('plCX').value || 0); pl.cz0 = Math.round(+$('plCZ').value || 0); save('platform'); refreshAll(); };
+  $('plCenter').onclick = () => { if (!CAN && deny()) return; const pl = P().platform; pl.cx0 = -Math.floor(pl.size / 2); pl.cz0 = -Math.floor(pl.size / 2); save('platform'); refreshAll(); };
 
   /* ---------- views ---------- */
   function topView(x, z, h) { const pl = P().platform; cam.x = x ?? (pl.cx0 + pl.size / 2) * 16; cam.z = z ?? (pl.cz0 + pl.size / 2) * 16; cam.y = h ?? pl.size * 16 * 0.95; cam.yaw = 0; cam.pitch = -1.5707; redraw(); }
@@ -741,13 +766,29 @@
   $('fullBtn').onclick = () => { try { const p = document.fullscreenElement ? document.exitFullscreen() : $('stage').requestFullscreen(); p && p.catch && p.catch(() => App.toast('Полный экран здесь не поддерживается')); } catch (e) { App.toast('Полный экран здесь не поддерживается'); } };
   document.addEventListener('fullscreenchange', () => { $('fullBtn').textContent = document.fullscreenElement ? 'Выйти из полного экрана' : 'Во весь экран'; });
 
-  function refreshAll() { sel.clear(); buildGround(); renderPlatform(); renderSel(); renderTasks(); syncStructures(); }
+  function restoreP(j) {
+    const o = JSON.parse(j); restoring = true;
+    P().structures = o.s; P().tasks = o.t;
+    for (const [id, z, zc, zn] of o.z) { const d = defOf(id); if (d) { d.zones = z; d.zoneC = zc; d.zoneNames = zn; zoneMaps.delete(d); } }
+    save('structures'); save('tasks'); save('structdefs'); restoring = false; lastSnap = j;
+    if (!insts().some(q => q.id === selStruct)) selStruct = null;
+    syncStructures(); colorGround(); renderSel(); renderTasks();
+  }
+  function undoPlan() { if (!CAN) return deny(); const op = undoP.pop(); if (!op) { App.toast('Нечего отменять', 1500); return; } redoP.push(op); restoreP(op[0]); App.toast('Отменено', 1200); }
+  function redoPlan() { if (!CAN) return deny(); const op = redoP.pop(); if (!op) { App.toast('Нечего возвращать', 1500); return; } undoP.push(op); restoreP(op[1]); App.toast('Возвращено', 1200); }
+  $('pUndo').onclick = undoPlan; $('pRedo').onclick = redoPlan;
+  document.addEventListener('keydown', e => {
+    const a = document.activeElement; if (walk.on || a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT')) return;
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redoPlan() : undoPlan(); }
+    else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') { e.preventDefault(); redoPlan(); }
+  });
+  function refreshAll() { lastSnap = snapP(); sel.clear(); buildGround(); renderPlatform(); renderSel(); renderTasks(); syncStructures(); }
   App.onChange(why => { if (why === 'import' || why === 'replace' || why === 'settings') refreshAll(); });
   const mq = window.matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener && mq.addEventListener('change', () => colorGround());
   window.addEventListener('themechange', () => { colorGround(); redraw(); });
 
   if (!CAN) {
-    ['plApply', 'plCenter', 'placeRow', 'brushBtn', 'dragRow'].forEach(id => $(id).hidden = true);
+    ['plApply', 'plCenter', 'placeRow', 'brushBtn', 'dragRow', 'pUndo', 'pRedo'].forEach(id => $(id).hidden = true);
     ['plSize', 'plCX', 'plCZ'].forEach(id => $(id).disabled = true);
     $('selInfo').insertAdjacentHTML('afterend', '<p class="note">Размечать чанки и ставить структуры могут модераторы. Ты можешь смотреть и выбирать чанки, чтобы прочитать задачу.</p>');
   }

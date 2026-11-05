@@ -7,7 +7,7 @@
 <script>/* theme before first paint: saved choice, dark by default */ try { document.documentElement.dataset.theme = localStorage.getItem("mcmap.theme") || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
-<link rel="stylesheet" href="css/style.css?v=1109">
+<link rel="stylesheet" href="css/style.css?v=1110">
 </head>
 <body>
 <div class="app">
@@ -17,7 +17,8 @@
       <button class="btn primary" id="walkBtn" aria-pressed="false">Войти внутрь</button>
       <button class="btn" id="viewBtn">Обзор</button>
       <div class="seg" id="toolSeg" role="group" aria-label="Инструмент">
-        <button class="btn" data-tool="block" aria-pressed="true" title="B">Блок</button>
+        <button class="btn" data-tool="look" aria-pressed="true" title="H — клики ничего не меняют">✋ Смотреть</button>
+        <button class="btn" data-tool="block" aria-pressed="false" title="B">Блок</button>
         <button class="btn" data-tool="brush" aria-pressed="false" title="N">Кисть</button>
         <button class="btn" data-tool="select" aria-pressed="false" title="V">Выделение</button>
       </div>
@@ -98,7 +99,7 @@
       <div class="palette" id="palette" aria-label="Блоки этой структуры"></div>
       <div id="brushOpts" class="row" hidden>
         <label class="f">Размер кисти<select id="brushSize"><option value="1">1 блок</option><option value="2">3</option><option value="3">5</option><option value="4">7</option><option value="6">11</option><option value="9">17</option></select></label>
-        <label class="f">Режим<select id="brushMode"><option value="sphere">Шар из блока</option><option value="paint">Перекрасить только блоки</option><option value="erase">Стереть</option></select></label>
+        <label class="f">Режим<select id="brushMode"><option value="sphere">Шар из блока</option><option value="paint">Перекрасить (только видимую поверхность)</option><option value="erase">Стереть</option></select></label>
       </div>
       <label class="chip"><input type="checkbox" id="symOn" checked><span class="dot" style="background:var(--accent)"></span>Зеркалить правки по симметрии</label>
       <p class="note" id="toolHelp"></p>
@@ -157,9 +158,9 @@
 <script src="js/config.js"></script>
 <script src="js/common.js?v=1106"></script>
 <script src="js/temple.js?v=1106"></script>
-<script src="js/vox.js?v=1108"></script>
+<script src="js/vox.js?v=1110"></script>
 <script src="js/shapes.js?v=1106"></script>
 <script src="js/gizmo.js?v=1109"></script>
-<script src="js/structures.js?v=1109"></script>
+<script src="js/structures.js?v=1110"></script>
 </body>
 </html>

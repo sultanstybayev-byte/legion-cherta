@@ -183,7 +183,7 @@ function cleanDefs(list) {
       sym, dataV: int(d.dataV || 0, 'Версия модели', 0, 1e15), backupV: int(d.backupV || 0, 'Версия копии', 0, 1e15),
       bw: int(d.bw || 0, 'Ширина модели', 0, 1024), bd: int(d.bd || 0, 'Глубина модели', 0, 1024), vx0: int(d.vx0 || 0, 'Сдвиг X', -1024, 1024), vz0: int(d.vz0 || 0, 'Сдвиг Z', -1024, 1024),
       scale: [0.55, 0.75, 1].includes(Number(d.scale)) ? Number(d.scale) : 1, edits,
-      zones: (Array.isArray(d.zones) ? d.zones : []).filter(z => Array.isArray(z) && z.length === 4 && z.every(Number.isFinite)).slice(0, 60000).map(z => z.map(v => Math.trunc(v))),
+      zones: (Array.isArray(d.zones) ? d.zones : []).filter(z => Array.isArray(z) && z.length === 4 && z.every(Number.isFinite)).slice(0, 150000).map(z => z.map(v => Math.trunc(v))), zoneC: d.zoneC === 1 ? 1 : 4,
       zoneNames: Object.fromEntries(Object.entries(d.zoneNames && typeof d.zoneNames === 'object' ? d.zoneNames : {}).filter(([k]) => /^\d{1,2}$/.test(k)).slice(0, 16).map(([k, v]) => [k, String(v || '').slice(0, 40)])),
       w: int(d.w || 1, 'Ширина', 1, 32), d: int(d.d || 1, 'Глубина', 1, 32), h: int(d.h || 8, 'Высота', 1, 512), color: color(d.color), note: str(d.note, 600, 'Заметка') };
   });

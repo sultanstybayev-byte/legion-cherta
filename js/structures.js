@@ -18,7 +18,7 @@
   let cur = null, vox = null, dirty = false, saveTimer = 0, saving = false;
   const undoS = [], redoS = [];
   const sel = { p1: null, p2: null };
-  let clip = null, tool = 'block';
+  let clip = null, tool = 'look';
   const slots = ['smooth_quartz', 'calcite', 'glass', 'polished_diorite', 'white_concrete', 'sea_lantern', 'stone_bricks', 'andesite', 'orange_concrete'].map(n => 'minecraft:' + n);
   let slot = 0; const block = () => slots[slot];
   const brush = { size: 1, mode: 'sphere' };
@@ -338,12 +338,23 @@
     if (ok) { flushView(); redraw(); } else rebuild();
     renderInfo();
   }
+  // shape changes (add, move, turn, size, settings, delete) are kept as before/after copies of the shape list
+  function shapeOp(label, before) {
+    const after = JSON.parse(JSON.stringify(shapes())); if (JSON.stringify(before) === JSON.stringify(after)) return false;
+    undoS.push({ label, sh: [before, after], rec: new Int32Array(0) }); if (undoS.length > 60) undoS.shift(); redoS.length = 0; return true;
+  }
+  const shapesSnap = () => JSON.parse(JSON.stringify(shapes()));
+  function setShapes(list) { const d = defOf(cur); if (!d) return; d.shapes = JSON.parse(JSON.stringify(list)); if (!d.shapes.some(q => q.id === selShape)) selShape = null; xf = null; shapesChanged(); }
   function undo(steps) {
-    let done = 0; for (let s = 0; s < (steps || 1); s++) { const op = undoS.pop(); if (!op) break; const r = op.rec; for (let i = r.length - 5; i >= 0; i -= 5) vox.set(r[i], r[i + 1], r[i + 2], r[i + 3]); if (op.shape) { shapes().push(JSON.parse(JSON.stringify(op.shape))); selShape = op.shape.id; shapesChanged(); } redoS.push(op); refreshAfter(r); done++; }
+    let done = 0; for (let s = 0; s < (steps || 1); s++) { const op = undoS.pop(); if (!op) break;
+      if (op.sh) { setShapes(op.sh[0]); redoS.push(op); done++; weLog('отменено: ' + op.label); continue; }
+      const r = op.rec; for (let i = r.length - 5; i >= 0; i -= 5) vox.set(r[i], r[i + 1], r[i + 2], r[i + 3]); if (op.shape) { shapes().push(JSON.parse(JSON.stringify(op.shape))); selShape = op.shape.id; shapesChanged(); } redoS.push(op); refreshAfter(r); done++; }
     if (done) markDirty(); return done;
   }
   function redo(steps) {
-    let done = 0; for (let s = 0; s < (steps || 1); s++) { const op = redoS.pop(); if (!op) break; const r = op.rec; for (let i = 0; i < r.length; i += 5) vox.set(r[i], r[i + 1], r[i + 2], r[i + 4]); if (op.shape) { removeShape(op.shape.id, true); } undoS.push(op); refreshAfter(r); done++; }
+    let done = 0; for (let s = 0; s < (steps || 1); s++) { const op = redoS.pop(); if (!op) break;
+      if (op.sh) { setShapes(op.sh[1]); undoS.push(op); done++; weLog('возвращено: ' + op.label); continue; }
+      const r = op.rec; for (let i = 0; i < r.length; i += 5) vox.set(r[i], r[i + 1], r[i + 2], r[i + 4]); if (op.shape) { removeShape(op.shape.id, true); } undoS.push(op); refreshAfter(r); done++; }
     if (done) markDirty(); return done;
   }
   $('undoBtn').onclick = () => { if (!undo()) App.toast('Нечего отменять', 1500); };
@@ -381,7 +392,8 @@
   document.querySelectorAll('#toolSeg [data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
   $('brushSize').onchange = e => { brush.size = +e.target.value; }; $('brushMode').onchange = e => { brush.mode = e.target.value; };
   function helpText() {
-    $('toolHelp').innerHTML = tool === 'block' ? '<b>ЛКМ</b> — сломать блок, <b>ПКМ</b> — поставить выбранный, <b>колёсико-клик</b> — взять блок под прицелом.'
+    $('toolHelp').innerHTML = tool === 'look' ? '<b>Смотреть</b>: клики ничего не меняют — свободно крути камеру и ходи. <b>Колёсико-клик</b> — взять блок в руку. Чтобы строить, выбери «Блок», «Кисть» или «Выделение» (клавиши <b>B</b>/<b>N</b>/<b>V</b>, <b>H</b> — снова «Смотреть»).'
+      : tool === 'block' ? '<b>ЛКМ</b> — сломать блок, <b>ПКМ</b> — поставить выбранный, <b>колёсико-клик</b> — взять блок под прицелом.'
       : tool === 'brush' ? '<b>ЛКМ</b> (можно водить с зажатой) — кисть по режиму, <b>ПКМ</b> — стереть шаром. Размер 1 — один блок. В обзоре вращай камеру правой кнопкой.'
       : '<b>ЛКМ</b> — точка 1, <b>ПКМ</b> — точка 2. Дальше — кнопки WorldEdit или команды внизу.';
   }
@@ -389,6 +401,7 @@
   function useTool(a, button) {
     if (!a) return; if (!CAN) { deny(); return; }
     if (button === 1) { if (!a.ground) { setSlotBlock(vox.name(a.x, a.y, a.z)); App.toast('Взят блок: ' + VX.label(block()), 1500); } return; }
+    if (tool === 'look') return;
     if (tool === 'select') { const p = a.ground ? [a.px, a.py, a.pz] : [a.x, a.y, a.z]; if (button === 0) sel.p1 = p; else sel.p2 = p; drawSel(); weLog(`точка ${button === 0 ? 1 : 2}: ${p.join(', ')}${selBox() ? ' · ' + selSize() : ''}`); return; }
     if (tool === 'block') {
       if (button === 0) { if (!a.ground) apply([[a.x, a.y, a.z, 'minecraft:air']], 'сломать'); }
@@ -398,9 +411,21 @@
     if (tool === 'brush') {
       const c = a.ground ? [a.px, a.py, a.pz] : [a.x, a.y, a.z], cells = sphereCells(c[0], c[1], c[2], brush.size);
       if (button === 2 || brush.mode === 'erase') apply(cells.map(([x, y, z]) => [x, y, z, 'minecraft:air']), 'кисть: стереть');
-      else if (brush.mode === 'paint') apply(cells.filter(([x, y, z]) => vox.get(x, y, z)).map(([x, y, z]) => [x, y, z, block()]), 'кисть: перекрасить');
+      else if (brush.mode === 'paint') { if (!a.ground) apply(surfaceCells(a.x, a.y, a.z, brush.size).map(([x, y, z]) => [x, y, z, block()]), 'кисть: перекрасить'); }
       else apply(cells.map(([x, y, z]) => [x, y, z, block()]), 'кисть: шар');
     }
+  }
+  // "paint" brush: only what is seen — blocks around the hit one (within the brush), connected to it, with a face turned to the camera
+  function surfaceCells(hx, hy, hz, size) {
+    const r = size - 0.5, cp = camera.position, p = palInfo(), open = q => q === 0 || p.open[q];
+    let vx = cp.x - hx - .5, vy = cp.y - hy - .5, vz = cp.z - hz - .5; const l = Math.hypot(vx, vy, vz) || 1; vx /= l; vy /= l; vz /= l;
+    const D6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+    const seen = (x, y, z) => D6.some(([a, b, c]) => open(vox.get(x + a, y + b, z + c)) && a * vx + b * vy + c * vz > 0.15);
+    const out = [[hx, hy, hz]], vis = new Set([hx + ',' + hy + ',' + hz]), st = [[hx, hy, hz]];
+    while (st.length && size > 1) { const [x, y, z] = st.pop();
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) { const X = x + a, Y = y + b, Z = z + c, k = X + ',' + Y + ',' + Z; if (vis.has(k)) continue; vis.add(k);
+        if ((X - hx) ** 2 + (Y - hy) ** 2 + (Z - hz) ** 2 > r * r || !vox.get(X, Y, Z) || !seen(X, Y, Z)) continue; out.push([X, Y, Z]); st.push([X, Y, Z]); } }
+    return out;
   }
   function blocksPlayer(x, y, z) { return x + 1 > fp.x - .3 && x < fp.x + .3 && z + 1 > fp.z - .3 && z < fp.z + .3 && y + 1 > fp.y && y < fp.y + 1.8; }
 
@@ -648,14 +673,14 @@
   }
   document.querySelectorAll('[data-add]').forEach(btn => btn.onclick = () => {
     if (!CAN && deny()) return; if (!vox) return;
-    const t = btn.dataset.add, sh = SH.make(t, [0, 0, 0], block()); sh.pos = newPos(t, sh.size);
+    const before = shapesSnap(), t = btn.dataset.add, sh = SH.make(t, [0, 0, 0], block()); sh.pos = newPos(t, sh.size);
     const same = shapes().filter(q => q.type === t).length; if (same) sh.name += ' ' + (same + 1);
-    shapes().push(sh); selShape = sh.id; shapesChanged();
+    shapes().push(sh); selShape = sh.id; shapesChanged(); shapeOp('новая фигура', before);
     App.toast(`${sh.name}: наведи мышь на 3D и жми G — двигать, R — вращать, S — размер. Enter — в блоки.`, 5000);
   });
   function selectShape(id) { selShape = id; xf = null; renderShapes(); drawGhosts(); }
-  function removeShape(id, silent) { const d = defOf(cur); if (!d) return; d.shapes = shapes().filter(q => q.id !== id); if (selShape === id) selShape = null; shapesChanged(); if (!silent) App.toast('Фигура удалена', 1500); }
-  function dupShape() { const s0 = curShape(); if (!s0) return; const c = clone(s0); c.id = Math.random().toString(36).slice(2, 10); c.name = s0.name + ' копия'; c.pos[0] += Math.max(2, Math.round(s0.size[0] * .6)); shapes().push(c); selShape = c.id; shapesChanged(); startXf('G'); }
+  function removeShape(id, silent) { const d = defOf(cur); if (!d) return; const before = shapesSnap(); d.shapes = shapes().filter(q => q.id !== id); if (selShape === id) selShape = null; shapesChanged(); if (!silent) { shapeOp('удалить фигуру', before); App.toast('Фигура удалена · Ctrl+Z вернёт', 1800); } }
+  function dupShape() { const s0 = curShape(); if (!s0) return; const before = shapesSnap(), c = clone(s0); c.id = Math.random().toString(36).slice(2, 10); c.name = s0.name + ' копия'; c.pos[0] += Math.max(2, Math.round(s0.size[0] * .6)); shapes().push(c); selShape = c.id; shapesChanged(); shapeOp('копия фигуры', before); startXf('G'); }
   function bakeShape(id) {
     if (!CAN && deny()) return; const s0 = shapes().find(q => q.id === id); if (!s0) return;
     const nm = s0.mode === 'cut' ? 'minecraft:air' : (s0.block || block()), cells = SH.cells(s0);
@@ -672,7 +697,11 @@
   syncGizUI();
   $('guidesOn').checked = App.pref('struct.guides', true);
   $('guidesOn').onchange = e => { App.setPref('struct.guides', e.target.checked); drawGhosts(); };
-  $('sBlock').onclick = () => { const q = curShape(); if (!q) return; q.block = block(); shapesChanged(); };
+  $('sBlock').onclick = () => { const q = curShape(); if (!q) return; const b = shapesSnap(); q.block = block(); shapesChanged(); shapeOp('блок фигуры', b); };
+  let fieldBefore = null;   // shapes as they were when a field got focus; one undo step per edited field
+  $('shapeEd').addEventListener('focusin', () => { fieldBefore = shapesSnap(); });
+  $('shapeEd').addEventListener('pointerdown', () => { fieldBefore = shapesSnap(); });
+  $('shapeEd').addEventListener('change', () => { if (fieldBefore) { shapeOp('настройка фигуры', fieldBefore); fieldBefore = shapesSnap(); } });
   $('sName').oninput = () => { const q = curShape(); if (!q) return; q.name = $('sName').value.slice(0, 40); renderShapeList(); saveShapesLater(); };
   $('sMode').onchange = () => { const q = curShape(); if (!q) return; q.mode = $('sMode').value; shapesChanged(); };
   document.querySelectorAll('#shapeEd .vec input').forEach(inp => {
@@ -685,7 +714,7 @@
       <button class="btn sm" data-eye="${esc(q.id)}" title="Скрыть / показать">${q.hidden ? 'показать' : 'скрыть'}</button></div>`).join('') || '<p class="note">Фигур нет. Добавь кнопкой выше.</p>';
   }
   $('shapeList').addEventListener('click', e => {
-    const eye = e.target.closest('[data-eye]'); if (eye) { const q = shapes().find(x => x.id === eye.dataset.eye); if (q) { q.hidden = !q.hidden; shapesChanged(); } return; }
+    const eye = e.target.closest('[data-eye]'); if (eye) { const q = shapes().find(x => x.id === eye.dataset.eye); if (q) { const b = shapesSnap(); q.hidden = !q.hidden; shapesChanged(); shapeOp(q.hidden ? 'скрыть фигуру' : 'показать фигуру', b); } return; }
     const it = e.target.closest('[data-sid]'); if (it) selectShape(it.dataset.sid === selShape ? null : it.dataset.sid);
   });
   function renderShapes() {
@@ -812,7 +841,7 @@
   const toScreen = v => { const p = v.clone().project(camera), r = canvas.getBoundingClientRect(); return [(p.x + 1) / 2 * r.width, (1 - p.y) / 2 * r.height]; };
   function startXf(kind) {
     const q = curShape(); if (!q || (!CAN && deny())) return;
-    xf = { kind, axis: kind === 'R' ? 1 : null, start: clone(q), mx: mouse.x, my: mouse.y, shift: false };
+    xf = { kind, axis: kind === 'R' ? 1 : null, start: clone(q), before: shapesSnap(), mx: mouse.x, my: mouse.y, shift: false };
     weLog({ G: 'Двигаешь', R: 'Вращаешь', S: 'Меняешь размер' }[kind] + ' «' + q.name + '»: веди мышь · X/Y/Z — ось · клик/Enter — готово · Esc/ПКМ — отмена'); drawGhosts();
   }
   function updateXf(e) {
@@ -839,7 +868,7 @@
     $('weLog').textContent = `${{ G: 'Позиция', R: 'Поворот', S: 'Размер' }[xf.kind]}${xf.axis != null ? ' по ' + 'XYZ'[xf.axis] : ''}: ${(xf.kind === 'G' ? q.pos : xf.kind === 'R' ? q.rot : q.size).map(v => +(+v).toFixed(1)).join(' · ')}`;
     drawGhostsSoon();
   }
-  function confirmXf() { if (!xf) return; xf = null; drawGhosts(); renderShapes(); saveShapesLater(); }
+  function confirmXf() { if (!xf) return; const b = xf.before, k = xf.kind; xf = null; drawGhosts(); renderShapes(); saveShapesLater(); shapeOp({ G: 'сдвиг фигуры', R: 'поворот фигуры', S: 'размер фигуры' }[k], b); }
   const gizStep = (e, shape) => shape && e.shiftKey ? 0.1 : 1;
   function cancelXf() { const q = curShape(); if (xf && q) Object.assign(q, clone(xf.start)); xf = null; drawGhosts(); renderShapes(); }
 
@@ -860,7 +889,7 @@
     if (gAxis >= 0) {   // drag an arrow: the selected shape, or the blocks of the selected area, move along that axis
       const q = curShape(), b = selBox(), onShape = !!(q && !q.hidden && $('sGhost').checked);
       const dir = giz.axisDir(gAxis), R0 = new THREE.Matrix4().makeRotationFromQuaternion(onShape ? quatOf(q) : new THREE.Quaternion());
-      drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, b: 0, moved: true, giz: onShape ? { axis: gAxis, q, start: clone(q), dir, R0, C: pivotOf(q), rot: giz.kind === 'rotate', last: 0 } : { axis: gAxis, box: b, p1: sel.p1.slice(), p2: sel.p2.slice(), last: 0 } };
+      drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, b: 0, moved: true, giz: onShape ? { axis: gAxis, q, start: clone(q), before: shapesSnap(), dir, R0, C: pivotOf(q), rot: giz.kind === 'rotate', last: 0 } : { axis: gAxis, box: b, p1: sel.p1.slice(), p2: sel.p2.slice(), last: 0 } };
       giz.begin(camera, canvas, gAxis, e.clientX, e.clientY); canvas.style.cursor = 'move'; redraw(); return;
     }
     drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, b: e.button, moved: false, paint: tool === 'brush' && e.button === 0 && !!vox };
@@ -885,7 +914,7 @@
     }
     if (!drag) {
       if (giz && giz.visible && !xf) { const a = giz.pick(camera, canvas, e.clientX, e.clientY); if (giz.hover(a)) redraw(); canvas.style.cursor = a >= 0 ? 'pointer' : 'grab'; if (a >= 0) return; }
-      if (vox && !hoverQ) { hoverQ = true; const x = e.clientX, y = e.clientY; requestAnimationFrame(() => { hoverQ = false; if (drag || fp.on) return; const a = aimMouse(x, y); if (CAN) showAim(a); hoverInfo(a); redraw(); }); } return; }
+      if (vox && !hoverQ) { hoverQ = true; const x = e.clientX, y = e.clientY; requestAnimationFrame(() => { hoverQ = false; if (drag || fp.on) return; const a = aimMouse(x, y); if (CAN) showAim(tool === 'look' ? null : a); hoverInfo(a); redraw(); }); } return; }
     if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true;
     if (drag.paint) { const a = aimMouse(e.clientX, e.clientY), k = a ? a.x + ',' + a.y + ',' + a.z : ''; if (a && k !== drag.lastKey) { drag.lastKey = k; useTool(a, 0); } showAim(a); return; }
     if (drag.moved) { orbit.th += (e.clientX - drag.x) * 0.008; orbit.ph = Math.min(1.55, Math.max(0.05, orbit.ph - (e.clientY - drag.y) * 0.008)); redraw(); }
@@ -896,7 +925,7 @@
     if (!drag) return; const d = drag; drag = null;
     if (d.giz) {
       giz.end(); canvas.style.cursor = 'grab'; const g = d.giz;
-      if (g.q) { if (g.last) { saveShapesLater(); renderShapes(); } drawGhosts(); updateGiz(); }
+      if (g.q) { if (g.last) { saveShapesLater(); renderShapes(); shapeOp(g.rot ? 'поворот фигуры' : 'сдвиг фигуры', g.before); } drawGhosts(); updateGiz(); }
       else { sel.p1 = g.p1; sel.p2 = g.p2; const v = [0, 0, 0]; v[g.axis] = g.last; const n = g.last ? moveSel(v) : 0; if (g.last) weLog(`сдвинуто по ${'XYZ'[g.axis]} на ${g.last > 0 ? '+' : ''}${g.last}: ${fmt(n)} бл.${symActive() ? ' (с симметрией)' : ''} · Ctrl+Z — отменить`); else drawSel(); }
       redraw(); return;
     }
@@ -927,7 +956,7 @@
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') { e.preventDefault(); redo(); return; }
     if (/^Digit[1-9]$/.test(e.code)) { slot = +e.code.slice(5) - 1; renderHotbar(); return; }
-    if (e.code === 'KeyB') return setTool('block'); if (e.code === 'KeyN') return setTool('brush'); if (e.code === 'KeyV') return setTool('select');
+    if (e.code === 'KeyH') return setTool('look'); if (e.code === 'KeyB') return setTool('block'); if (e.code === 'KeyN') return setTool('brush'); if (e.code === 'KeyV') return setTool('select');
     if (e.code === 'KeyT' || e.key === '/') { e.preventDefault(); if (fp.on && document.pointerLockElement === canvas) { resumeFP = true; document.exitPointerLock(); } $('cmd').focus(); if (e.key === '/') $('cmd').value = '//'; return; }
     if (!fp.on) return;
     if (e.code === 'Escape') { stopFP(); return; }
@@ -983,11 +1012,11 @@
     }
     const oy = fp.y; fp.y += fp.vy * dt; fp.ground = false;
     if (hits(fp.x, fp.y, fp.z)) { if (fp.vy < 0) { fp.y = Math.floor(fp.y) + 1; fp.ground = true; if (hits(fp.x, fp.y, fp.z)) fp.y = oy; } else fp.y = oy; fp.vy = 0; }
-    if (CAN) showAim(aimCenter());
+    if (CAN) showAim(tool === 'look' ? null : aimCenter());
     draw(); hudPos(); fp.raf = requestAnimationFrame(tickFP);
   }
   function hud() {
-    const t = { block: 'ЛКМ — сломать · ПКМ — поставить · колёсико-клик — взять блок', brush: 'ЛКМ — кисть (держи и води) · ПКМ — стереть', select: 'ЛКМ — точка 1 · ПКМ — точка 2' }[tool];
+    const t = { look: 'смотреть: клики ничего не меняют · B/N/V — строить', block: 'ЛКМ — сломать · ПКМ — поставить · колёсико-клик — взять блок', brush: 'ЛКМ — кисть (держи и води) · ПКМ — стереть', select: 'ЛКМ — точка 1 · ПКМ — точка 2' }[tool];
     $('hud').innerHTML = fp.on
       ? (fp.locked ? `<b>W</b><b>A</b><b>S</b><b>D</b> · <b>Space</b>/<b>Shift</b> вверх/вниз · <b>R</b> или двойное <b>W</b> — быстрее · <b>F</b> полёт/ходьба · ${t} · <b>1–9</b> блок · <b>T</b> или <b>/</b> — команда · <b>Esc</b> — выйти<br><span id="fpPos"></span>`
         : 'Мышь отпущена. <b>Кликни по 3D</b>, чтобы продолжить, или «Выйти».')
@@ -1002,7 +1031,7 @@
   function hudPos() { const el = document.getElementById('fpPos'); if (el) { const [ox, oz] = gridOff(); el.textContent = `X ${Math.floor(fp.x)} · Y ${Math.floor(fp.y)} · Z ${Math.floor(fp.z)} от центра модели · чанк ${Math.floor((Math.floor(fp.x) + ox) / 16)}, ${Math.floor((Math.floor(fp.z) + oz) / 16)}${fp.fly ? ' · полёт' : ''}`; } }
 
   /* ================= start ================= */
-  setTool('block'); renderHotbar(); helpText();
+  setTool('look'); renderHotbar(); helpText();
   $('symOn').addEventListener('change', () => drawGhosts());
   $('surfOn').checked = App.pref('struct.surfGrid', true);
   $('surfOn').onchange = e => { App.setPref('struct.surfGrid', e.target.checked); drawSurfGrid(); };

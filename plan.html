@@ -7,7 +7,7 @@
 <script>/* theme before first paint: saved choice, dark by default */ try { document.documentElement.dataset.theme = localStorage.getItem("mcmap.theme") || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
-<link rel="stylesheet" href="css/style.css?v=1107">
+<link rel="stylesheet" href="css/style.css?v=1110">
 </head>
 <body>
 <div class="app">
@@ -18,27 +18,29 @@
       <button class="btn" id="rectBtn" aria-pressed="false">Выделить рамкой</button>
       <button class="btn" id="sideView">Обзор</button>
       <button class="btn" id="fullBtn">Во весь экран</button>
+      <button class="btn" id="pUndo" title="Ctrl+Z">↶ Отменить</button>
+      <button class="btn" id="pRedo" title="Ctrl+Y">↷ Вернуть</button>
       <button class="btn primary" id="walkBtn" aria-pressed="false">Войти внутрь</button>
       <button class="btn" id="brushBtn" aria-pressed="false">Кисть зон</button>
       <div class="brushbar" id="brushBar" hidden>
         <div class="swatches" id="brushSw"></div>
         <button class="btn sm" id="brushErase" aria-pressed="false">Ластик</button>
-        <label class="note">Размер <select id="brushSize"><option value="1">4 блока</option><option value="2" selected>12 блоков</option><option value="3">20 блоков</option></select></label>
+        <label class="note">Размер <select id="brushSize"><option value="0">1 блок</option><option value="1">3 блока</option><option value="2" selected>5 блоков</option><option value="4">9 блоков</option><option value="8">17 блоков</option><option value="16">33 блока</option></select></label>
       </div>
     </div>
-    <div class="hud" id="hud"><b>W</b><b>A</b><b>S</b><b>D</b> лететь · <b>Space</b>/<b>C</b> вверх/вниз · <b>Shift</b> быстрее · мышь — смотреть · колесо — вперёд/назад<br>клик — чанк · <b>Shift</b>+клик — добавить · двойной клик — вся задача · «Войти внутрь» — ходить от первого лица · кисть: зажми на структуре и води · <span id="camPos"></span></div>
+    <div class="hud" id="hud"><b>W</b><b>A</b><b>S</b><b>D</b> лететь · <b>Space</b>/<b>C</b> вверх/вниз · <b>Shift</b> быстрее · мышь — смотреть · колесо — вперёд/назад<br>клик — чанк · <b>Shift</b>+клик — добавить · двойной клик — вся задача · «Войти внутрь» — ходить от первого лица · кисть: зажми на структуре и води — красит то, что видно (поверхность) · <b>Ctrl+Z</b> — отменить · <span id="camPos"></span></div>
     <div class="crosshair" aria-hidden="true"></div>
     <div class="banner" id="busy" hidden><h3>Считаю модель…</h3><p class="note">Большая структура, это пара секунд.</p></div>
   </main>
 
   <aside class="side" aria-label="Задачи, база и платформа">
     <div class="ptabs" role="tablist">
-      <button role="tab" data-tab="tasks" aria-selected="true">Задачи <span class="note" id="taskCount"></span></button>
-      <button role="tab" data-tab="structs" aria-selected="false">База <span class="note" id="structCount"></span></button>
+      <button role="tab" data-tab="structs" aria-selected="true">База <span class="note" id="structCount"></span></button>
       <button role="tab" data-tab="platform" aria-selected="false">Платформа</button>
+      <button role="tab" data-tab="tasks" aria-selected="false">Задачи <span class="note" id="taskCount"></span></button>
     </div>
 
-    <div data-pane="tasks">
+    <div data-pane="tasks" hidden>
       <section class="sec">
         <h2>Выбранные чанки <small id="selCount"></small></h2>
         <p class="note" id="selInfo"></p>
@@ -65,7 +67,7 @@
       <div class="list" id="taskList"></div>
     </div>
 
-    <div data-pane="structs" hidden>
+    <div data-pane="structs">
       <section class="sec">
         <h2>Поставить на платформу</h2>
         <label class="f">Структура из библиотеки<select id="defPick"></select></label>
@@ -125,8 +127,8 @@
 <script src="js/config.js"></script>
 <script src="js/common.js?v=1106"></script>
 <script src="js/temple.js?v=1106"></script>
-<script src="js/vox.js?v=1106"></script>
+<script src="js/vox.js?v=1110"></script>
 <script src="js/gizmo.js?v=1109"></script>
-<script src="js/plan.js?v=1108"></script>
+<script src="js/plan.js?v=1110"></script>
 </body>
 </html>
