@@ -1,16 +1,18 @@
 # Нужен только если разворачиваешь из командной строки (npx wrangler deploy).
 # Через сайт Cloudflare этот файл не нужен — см. README.md.
-name = "legion-api"
+name = "cherta"
 main = "worker.js"
 compatibility_date = "2025-01-01"
+keep_vars = true
 
 [vars]
-OWNER_ID = "ТВОЙ_TELEGRAM_ID"
-ALLOWED_ORIGIN = "https://ТВОЙ_ЛОГИН.github.io"
+OWNER_ID = "933048474"
+ALLOWED_ORIGIN = "https://sultanstybayev-byte.github.io"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "legion-map"
-database_id = "ВСТАВЬ_ID_БАЗЫ"
+database_name = "legion"
+database_id = "ce6cfe99-87d0-445c-80a9-fd9b251ae7e8"
 
+# BOT_TOKEN задаётся только в Cloudflare: Settings → Variables and Secrets → тип Secret.
 # Ключ бота задаётся секретом: npx wrangler secret put BOT_TOKEN
