@@ -1,8 +1,11 @@
 /* 3D planner. Scene units = world blocks: scene X/Z are the in-game X/Z, ground top at y = 0. */
 (async function () {
   const { $, sgn, fmt, esc, uid } = App;
+  await App.init();
   await App.load();
   App.mountTop('plan');
+  const CAN = App.can('plan');
+  const deny = () => { App.toast(App.user ? 'План меняют модераторы. Ты можешь смотреть.' : 'Войди через Telegram. План меняют модераторы.', 4000); return true; };
   const W = () => App.world, P = () => App.world.plan;
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const MATS = { 1: '#8b8f8e', 2: '#dcdedb', 3: '#f3ede4', 4: '#e0782b', 5: '#bdbdc1', 6: '#3c68c9', 7: '#a9d9cf', 8: '#e9b85a', 9: '#e6edf0', 10: '#e9ebec' };
@@ -232,12 +235,13 @@
   function renderSel() {
     const cs = selChunks();
     $('selCount').textContent = cs.length ? `${cs.length}` : '';
-    $('selEdit').hidden = !cs.length;
+    $('selEdit').hidden = !cs.length || !CAN;
     if (!cs.length) { $('selInfo').textContent = 'Кликни по чанку на платформе. Shift+клик добавляет ещё чанки.'; return; }
     const xs = cs.map(c => c[0]), zs = cs.map(c => c[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
     $('selInfo').innerHTML = cs.length === 1
       ? `Чанк <b class="mono">${sgn(x0)}, ${sgn(z0)}</b>: блоки X <span class="mono">${sgn(x0 * 16)}…${sgn(x0 * 16 + 15)}</span>, Z <span class="mono">${sgn(z0 * 16)}…${sgn(z0 * 16 + 15)}</span>`
       : `${cs.length} чанков в области X <span class="mono">${sgn(x0 * 16)}…${sgn(x1 * 16 + 15)}</span>, Z <span class="mono">${sgn(z0 * 16)}…${sgn(z1 * 16 + 15)}</span>`;
+    if (!CAN) { const ts0 = [...new Set(cs.map(c => taskOf.get(key(c[0], c[1]))).filter(Boolean))]; $('selInfo').innerHTML += ts0.length ? '<br>' + ts0.map(t => `<b>${esc(t.name)}</b>${t.note ? ': ' + esc(t.note) : ''}`).join('<br>') : '<br>Задачи нет.'; return; }
     const ts = new Set(cs.map(c => taskOf.get(key(c[0], c[1])) || null));
     const same = ts.size === 1 ? [...ts][0] : null;
     $('taskPick').innerHTML = '<option value="">Новая задача</option>' + P().tasks.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
@@ -255,6 +259,7 @@
   $('taskPick').onchange = fillTaskFields;
   function dropChunks(chunks) { const ks = new Set(chunks.map(c => key(c[0], c[1]))); for (const t of P().tasks) t.chunks = t.chunks.filter(c => !ks.has(key(c[0], c[1]))); }
   $('assignBtn').onclick = () => {
+    if (!CAN && deny()) return;
     const cs = selChunks(); if (!cs.length) return;
     const name = $('taskName').value.trim(); if (!name) { App.toast('Впиши название задачи'); $('taskName').focus(); return; }
     let t = P().tasks.find(q => q.id === $('taskPick').value);
@@ -275,7 +280,7 @@
   let delArm = { id: null, t: 0 };
   $('taskList').addEventListener('click', e => {
     const del = e.target.closest('[data-del]');
-    if (del) { e.stopPropagation(); const id = del.dataset.del;
+    if (del) { e.stopPropagation(); if (!CAN && deny()) return; const id = del.dataset.del;
       if (delArm.id !== id || Date.now() - delArm.t > 3000) { delArm = { id, t: Date.now() }; del.textContent = 'Точно?'; return; }
       P().tasks = P().tasks.filter(t => t.id !== id); App.save('tasks'); colorGround(); renderSel(); renderTasks(); return; }
     const it = e.target.closest('.item'); if (!it) return;
@@ -289,17 +294,18 @@
   /* ---------- base panel ---------- */
   $('baseScale').innerHTML = App.SCALES.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
   function renderBasePanel() { const b = P().base; $('basePlaced').checked = !!b.placed; $('baseHidden').checked = baseHidden; $('baseScale').value = String(b.scale); renderBaseInfo(); }
-  $('basePlaced').onchange = e => { P().base.placed = e.target.checked; App.save('base'); ensureBase(placeBase); renderBaseInfo(); };
+  $('basePlaced').onchange = e => { if (!CAN) { e.target.checked = !e.target.checked; deny(); return; } P().base.placed = e.target.checked; App.save('base'); ensureBase(placeBase); renderBaseInfo(); };
   $('baseHidden').onchange = e => { baseHidden = e.target.checked; try { localStorage.setItem('mcmap.baseHidden', baseHidden ? '1' : '0'); } catch (er) { } placeBase(); };
   $('baseScale').onchange = e => {
+    if (!CAN) { e.target.value = String(P().base.scale); deny(); return; }
     const s = +e.target.value, b = P().base;
     if (b.edits && b.edits.length) App.toast('Правки сделаны для другого масштаба и могут лечь не туда. Вставь правки этого масштаба со страницы базы.', 6000);
     b.scale = s; App.save('base'); ensureBase(placeBase);
   };
-  document.querySelectorAll('[data-move]').forEach(btn => btn.onclick = () => { const [dx, dz] = btn.dataset.move.split(',').map(Number); P().base.cx += dx; P().base.cz += dz; App.save('base'); placeBase(); });
-  $('baseToSel').onclick = () => { const cs = selChunks(); if (cs.length !== 1) { App.toast('Выбери один чанк — туда встанет центр базы'); return; } P().base.cx = cs[0][0]; P().base.cz = cs[0][1]; P().base.placed = true; App.save('base'); renderBasePanel(); ensureBase(placeBase); };
+  document.querySelectorAll('[data-move]').forEach(btn => btn.onclick = () => { if (!CAN && deny()) return; const [dx, dz] = btn.dataset.move.split(',').map(Number); P().base.cx += dx; P().base.cz += dz; App.save('base'); placeBase(); });
+  $('baseToSel').onclick = () => { if (!CAN && deny()) return; const cs = selChunks(); if (cs.length !== 1) { App.toast('Выбери один чанк — туда встанет центр базы'); return; } P().base.cx = cs[0][0]; P().base.cz = cs[0][1]; P().base.placed = true; App.save('base'); renderBasePanel(); ensureBase(placeBase); };
 
-  $('importBase').onclick = () => { $('importText').value = ''; $('importMsg').textContent = ''; $('importDlg').showModal(); $('importText').focus(); };
+  $('importBase').onclick = () => { if (!CAN && deny()) return; $('importText').value = ''; $('importMsg').textContent = ''; $('importDlg').showModal(); $('importText').focus(); };
   $('importDlg').querySelector('[data-close]').onclick = () => $('importDlg').close();
   $('importOk').onclick = () => {
     let j; try { j = JSON.parse($('importText').value); } catch (e) { $('importMsg').textContent = 'Не получилось прочитать текст. Скопируй его целиком ещё раз.'; return; }
@@ -313,8 +319,8 @@
   /* ---------- platform panel ---------- */
   function renderPlatform() { const pl = P().platform; $('plSize').value = pl.size; $('plCX').value = pl.cx0; $('plCZ').value = pl.cz0;
     $('plInfo').innerHTML = `${pl.size}×${pl.size} чанков = ${pl.size * 16}×${pl.size * 16} блоков<br>X ${sgn(pl.cx0 * 16)}…${sgn((pl.cx0 + pl.size) * 16 - 1)}, Z ${sgn(pl.cz0 * 16)}…${sgn((pl.cz0 + pl.size) * 16 - 1)}`; }
-  $('plApply').onclick = () => { const pl = P().platform; pl.size = Math.min(48, Math.max(8, Math.round(+$('plSize').value || 16))); pl.cx0 = Math.round(+$('plCX').value || 0); pl.cz0 = Math.round(+$('plCZ').value || 0); App.save('platform'); refreshAll(); };
-  $('plCenter').onclick = () => { const pl = P().platform, b = P().base; pl.cx0 = b.cx - Math.floor(pl.size / 2); pl.cz0 = b.cz - Math.floor(pl.size / 2); App.save('platform'); refreshAll(); };
+  $('plApply').onclick = () => { if (!CAN && deny()) return; const pl = P().platform; pl.size = Math.min(48, Math.max(8, Math.round(+$('plSize').value || 16))); pl.cx0 = Math.round(+$('plCX').value || 0); pl.cz0 = Math.round(+$('plCZ').value || 0); App.save('platform'); refreshAll(); };
+  $('plCenter').onclick = () => { if (!CAN && deny()) return; const pl = P().platform, b = P().base; pl.cx0 = b.cx - Math.floor(pl.size / 2); pl.cz0 = b.cz - Math.floor(pl.size / 2); App.save('platform'); refreshAll(); };
 
   /* ---------- views ---------- */
   function topView(x, z, h) { const pl = P().platform; cam.x = x ?? (pl.cx0 + pl.size / 2) * 16; cam.z = z ?? (pl.cz0 + pl.size / 2) * 16; cam.y = h ?? pl.size * 16 * 0.95; cam.yaw = 0; cam.pitch = -1.5707; redraw(); }
@@ -328,5 +334,15 @@
   App.onChange(why => { if (why === 'import' || why === 'replace' || why === 'settings') refreshAll(); });
   const mq = window.matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener && mq.addEventListener('change', () => colorGround());
 
+  if (!CAN) {
+    ['importBase', 'baseToSel', 'plApply', 'plCenter'].forEach(id => $(id).hidden = true);
+    document.querySelectorAll('[data-move]').forEach(b => b.hidden = true);
+    ['plSize', 'plCX', 'plCZ', 'baseScale'].forEach(id => $(id).disabled = true);
+    $('selInfo').insertAdjacentHTML('afterend', '<p class="note">Размечать чанки и двигать базу могут модераторы. Ты можешь смотреть и выбирать чанки, чтобы прочитать задачу.</p>');
+  }
+  if (App.mode === 'server' && !CAN) App.every(async () => {
+    const w = await App.api('GET', '/api/world'); if (JSON.stringify(w.plan) === JSON.stringify(P())) return;
+    App.world.plan = w.plan; const keep = [...sel]; refreshAll(); keep.forEach(k => sel.add(k)); colorGround(); renderSel();
+  }, 60000);
   resize(); refreshAll(); overview();
 })();

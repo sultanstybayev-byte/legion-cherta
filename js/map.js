@@ -12,6 +12,7 @@
     other:   { ru: 'Другое',          color: '#16a085', g: '•' }
   };
   const DIMS = { overworld: 'Верхний мир', nether: 'Незер', end: 'Энд' };
+  await App.init();
   await App.load();
   App.mountTop('map');
   const W = () => App.world;
@@ -100,6 +101,7 @@
       : 'Картинка не задана. Карта показывает сетку, метки и план.';
   }
   $('imgApply').onclick = () => {
+    if (!App.can('mapImage')) { App.toast('Картинку карты для всех меняют модераторы'); return; }
     const m = W().maps[dim], p = $('imgPath').value.trim();
     if (p) m.image = p; else if (m.image !== 'local:') m.image = '';
     m.x = Math.round(+$('imgX').value || 0); m.z = Math.round(+$('imgZ').value || 0); m.bpp = Math.max(0.0625, +$('imgBpp').value || 1);
@@ -107,13 +109,14 @@
   };
   $('imgLocal').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
-    await idb.put(dim, f); W().maps[dim].image = 'local:'; App.save('map'); await loadImage(); e.target.value = '';
+    await idb.put(dim, f); W().maps[dim].image = 'local:'; if (App.mode === 'local') App.save('map'); await loadImage(); e.target.value = '';
     App.toast('Картинка открыта. Если она стоит не на месте, привяжи её по двум точкам.', 4500);
   };
 
   /* calibration by two known points */
   let calib = null;
   $('calibBtn').onclick = () => {
+    if (!App.can('mapImage')) { App.toast('Привязывать картинку для всех могут модераторы'); return; }
     if (!imgSize) { App.toast('Сначала добавь картинку карты'); return; }
     calib = { pts: [] }; showCalib();
   };
@@ -163,7 +166,8 @@
       <p class="mono">X ${sgn(m.x)} · Y ${m.y ?? '—'} · Z ${sgn(m.z)}<br>чанк ${sgn(App.chunkOf(m.x))}, ${sgn(App.chunkOf(m.z))}</p>
       ${otherDim(m) ? `<p class="note mono">${otherDim(m)}</p>` : ''}
       ${m.note ? `<p>${esc(m.note).replace(/\n/g, '<br>')}</p>` : ''}
-      <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy" data-id="${m.id}">Координаты</button><button class="btn sm" data-act="tp" data-id="${m.id}">/tp</button><button class="btn sm" data-act="edit" data-id="${m.id}">Изменить</button></div>`;
+      ${App.mode === 'server' && m.owner ? `<p class="note">Добавил: ${esc(App.userName(m.owner))}</p>` : ''}
+      <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy" data-id="${m.id}">Координаты</button><button class="btn sm" data-act="tp" data-id="${m.id}">/tp</button>${App.canEditMarker(m) ? `<button class="btn sm" data-act="edit" data-id="${m.id}">Изменить</button>` : ''}</div>`;
   }
   const mkById = new Map();
   function renderMarkers() {
@@ -187,7 +191,7 @@
       if (b.dataset.act === 'copy') App.copy(coordText(m));
       if (b.dataset.act === 'tp') App.copy(`/tp @s ${m.x} ${m.y ?? '~'} ${m.z}`);
       if (b.dataset.act === 'edit') { map.closePopup(); openForm(m); }
-      if (b.dataset.act === 'here') { map.closePopup(); openForm(null, +b.dataset.x, +b.dataset.z); }
+      if (b.dataset.act === 'here') { map.closePopup(); if (mayAdd()) openForm(null, +b.dataset.x, +b.dataset.z); }
       if (b.dataset.act === 'copyxz') App.copy(`${b.dataset.x} ~ ${b.dataset.z}`);
       if (b.dataset.act === 'measure') { map.closePopup(); startMeasure(+b.dataset.x, +b.dataset.z); }
     });
@@ -213,20 +217,26 @@
     draft.on('dragend', () => { const p = xz(draft.getLatLng()); $('mX').value = Math.floor(p.x); $('mZ').value = Math.floor(p.z); });
   }
   ['mX', 'mZ', 'mCat'].forEach(id => $(id).addEventListener('input', updateDraft));
-  $('addBtn').onclick = () => openForm(null);
+  function mayAdd() {
+    if (App.can('marker')) return true;
+    if (!App.user) { App.toast('Войди через Telegram, чтобы ставить метки'); App.openLogin && App.openLogin(); }
+    else App.toast('Ставить метки могут участники. Напиши заявление на форуме, владелец выдаст роль.', 5000);
+    return false;
+  }
+  $('addBtn').onclick = () => { if (mayAdd()) openForm(null); };
   $('mCancel').onclick = closeForm;
-  $('mSave').onclick = () => {
+  $('mSave').onclick = async () => {
     const x = Math.floor(+$('mX').value), z = Math.floor(+$('mZ').value), yv = $('mY').value.trim();
     if ($('mX').value === '' || $('mZ').value === '' || !isFinite(x) || !isFinite(z)) { App.toast('Укажи X и Z или кликни по карте'); return; }
     const rec = { name: $('mName').value.trim() || 'Без названия', cat: $('mCat').value, x, y: yv === '' ? null : Math.floor(+yv), z, dim, note: $('mNote').value.trim() };
-    if (editing) Object.assign(W().markers.find(m => m.id === editing), rec);
-    else W().markers.push(Object.assign({ id: uid(), created: Date.now() }, rec));
-    App.save('markers'); closeForm(); renderMarkers(); App.toast('Метка сохранена');
+    const b = $('mSave'); b.disabled = true;
+    try { await App.saveMarker(rec, editing); closeForm(); renderMarkers(); App.toast('Метка сохранена'); }
+    catch (e) { App.toast(e.message, 5000); } finally { b.disabled = false; }
   };
   let delArm = 0;
-  $('mDelete').onclick = () => {
+  $('mDelete').onclick = async () => {
     if (Date.now() - delArm > 3000) { delArm = Date.now(); $('mDelete').textContent = 'Точно удалить?'; return; }
-    W().markers = W().markers.filter(m => m.id !== editing); App.save('markers'); closeForm(); renderMarkers(); App.toast('Метка удалена');
+    try { await App.deleteMarker(editing); closeForm(); renderMarkers(); App.toast('Метка удалена'); } catch (e) { App.toast(e.message, 5000); }
   };
 
   /* ---------- plan overlay ---------- */
@@ -299,6 +309,16 @@
   }
 
   App.onChange(why => { if (why === 'import' || why === 'replace') { loadImage(); } renderMarkers(); renderPlan(); renderSeed(); });
+  if (App.mode === 'server') {
+    if (!App.can('mapImage')) { ['imgPath', 'imgX', 'imgZ', 'imgBpp'].forEach(id => $(id).disabled = true); $('imgApply').hidden = true; $('calibBtn').hidden = true; }
+    App.every(async () => {
+      if (!$('formSec').hidden || calib) return;
+      const w = await App.api('GET', '/api/world'); App.addUsers(w.users);
+      const before = JSON.stringify([W().markers, W().plan, W().maps]);
+      W().markers = w.markers; W().plan = w.plan; const mapsChanged = JSON.stringify(W().maps[dim]) !== JSON.stringify(w.maps[dim]) && W().maps[dim].image !== 'local:'; W().maps = Object.assign(W().maps, w.maps);
+      if (before !== JSON.stringify([W().markers, W().plan, W().maps])) { renderMarkers(); renderPlan(); if (mapsChanged) loadImage(); }
+    }, 45000);
+  }
   map.setView(ll(W().plan.base.cx * 16 + 8, W().plan.base.cz * 16 + 8), -1);
   renderMarkers(); renderPlan(); renderSeed(); loadImage();
   const q = new URLSearchParams(location.search); if (q.has('x') && q.has('z')) { $('goto').value = q.get('x') + ' ' + q.get('z'); goto(); }
