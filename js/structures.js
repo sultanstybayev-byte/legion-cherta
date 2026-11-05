@@ -47,7 +47,7 @@
   }
   function renderInfo() {
     const d = defOf(cur); if (!d) return;
-    $('dInfo').textContent = isModel(d) && vox ? `${vox.w}×${vox.h}×${vox.d} блоков (${Math.ceil(vox.w / 16)}×${Math.ceil(vox.d / 16)} чанков), блоков в модели: ${fmt(vox.count())}, видов блоков: ${vox.palette.length - 1}.` : '';
+    $('dInfo').textContent = isModel(d) && vox ? `Размер ${vox.w}×${vox.h}×${vox.d} блоков (ширина × высота × глубина), блоков в модели: ${fmt(vox.count())}, видов блоков: ${vox.palette.length - 1}.` : '';
   }
   async function select(id) {
     if (dirty) await saveNow();
@@ -191,6 +191,7 @@
     return o(vox.get(x + 1, y, z)) || o(vox.get(x - 1, y, z)) || o(vox.get(x, y + 1, z)) || o(vox.get(x, y - 1, z)) || o(vox.get(x, y, z + 1)) || o(vox.get(x, y, z - 1));
   }
   function rebuild(recenter) {
+    hmDirty = true;
     for (const m of view.meshes) if (m) { scene.remove(m); m.material.dispose(); m.dispose(); }
     view.meshes = [null, null]; view.index.clear(); view.n = [0, 0];
     if (box) { scene.remove(box); box.traverse(x => { if (x.geometry && x.geometry !== geo) x.geometry.dispose(); if (x.material) x.material.dispose(); }); box = null; }
@@ -245,14 +246,37 @@
   function drawGrid() {
     if (grid) { scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); } if (groundPl) { scene.remove(groundPl); groundPl.geometry.dispose(); groundPl.material.dispose(); }
     const x0 = vox ? vox.x0 : -32, z0 = vox ? vox.z0 : -32, w = vox ? vox.w : 64, d = vox ? vox.d : 64;
-    const cx0 = Math.floor((x0 - 16) / 16) * 16, cx1 = Math.ceil((x0 + w + 16) / 16) * 16, cz0 = Math.floor((z0 - 16) / 16) * 16, cz1 = Math.ceil((z0 + d + 16) / 16) * 16, pts = [];
+    const [ox, oz] = gridOff(), cx0 = Math.floor((x0 - 16 + ox) / 16) * 16 - ox, cx1 = Math.ceil((x0 + w + 16 + ox) / 16) * 16 - ox, cz0 = Math.floor((z0 - 16 + oz) / 16) * 16 - oz, cz1 = Math.ceil((z0 + d + 16 + oz) / 16) * 16 - oz, pts = [];
     for (let x = cx0; x <= cx1; x += 16) pts.push(x, 0.02, cz0, x, 0.02, cz1);
     for (let z = cz0; z <= cz1; z += 16) pts.push(cx0, 0.02, z, cx1, 0.02, z);
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     grid = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x777f86, transparent: true, opacity: .6 })); scene.add(grid);
     groundPl = new THREE.Mesh(new THREE.PlaneGeometry(cx1 - cx0, cz1 - cz0), new THREE.MeshLambertMaterial({ color: 0x8a9488, transparent: true, opacity: .35, depthWrite: false }));
     groundPl.rotation.x = -Math.PI / 2; groundPl.position.set((cx0 + cx1) / 2, -0.01, (cz0 + cz1) / 2); scene.add(groundPl);
+    drawSurfGrid();
   }
+  // chunk borders as on the platform: the structure's centre block (x 0, z 0) sits on block 8 of a chunk (plus its shift there)
+  function gridOff() {
+    const s = W().plan.structures.find(q => q.def === cur && !((q.rot || 0) % 2));
+    return [(((8 + ((s && s.dx) || 0)) % 16) + 16) % 16, (((8 + ((s && s.dz) || 0)) % 16) + 16) % 16];
+  }
+  let surf = null, hmap = null, hmDirty = true;
+  const topAt = (x, z) => { const i = x - vox.x0, k = z - vox.z0; return (i < 0 || k < 0 || i >= vox.w || k >= vox.d) ? 0 : hmap[k * vox.w + i]; };
+  function drawSurfGrid() {
+    if (surf) { scene.remove(surf); surf.geometry.dispose(); surf.material.dispose(); surf = null; }
+    if (!vox || !$('surfOn').checked) { renderChunks(); redraw(); return; }
+    if (hmDirty || !hmap || hmap.length !== vox.w * vox.d) { hmap = VX.heightMap(vox); hmDirty = false; }
+    const [ox, oz] = gridOff(), pts = VX.chunkGridLines(topAt, vox.x0, vox.x0 + vox.w, vox.z0, vox.z0 + vox.d, ox, oz, 0.1);
+    if (pts.length) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); surf = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: new THREE.Color(css('--accent') || '#e07b2a') })); surf.renderOrder = 4; scene.add(surf); }
+    renderChunks(); redraw();
+  }
+  function renderChunks() {
+    if (!vox) { $('chunkInfo').textContent = ''; return; }
+    if (hmDirty || !hmap || hmap.length !== vox.w * vox.d) { hmap = VX.heightMap(vox); hmDirty = false; }
+    const [ox, oz] = gridOff(), u = VX.chunksUsed(topAt, vox.x0, vox.x0 + vox.w, vox.z0, vox.z0 + vox.d, ox, oz);
+    $('chunkInfo').textContent = u.n ? `Занимает чанков: ${u.n} (${u.cx1 - u.cx0 + 1}×${u.cz1 - u.cz0 + 1}). Центр модели — X 0, Z 0; сетка чанков — как на платформе.` : 'Пока пусто.';
+  }
+  let gridTimer = 0; const gridLater = () => { hmDirty = true; clearTimeout(gridTimer); gridTimer = setTimeout(drawSurfGrid, 600); };
   function frame() {
     if (!vox) return; const b = vox.bounds() || { x0: vox.x0, x1: vox.x0 + vox.w, y0: 0, y1: vox.h, z0: vox.z0, z1: vox.z0 + vox.d };
     orbit.tx = (b.x0 + b.x1 + 1) / 2; orbit.tz = (b.z0 + b.z1 + 1) / 2; orbit.ty = (b.y1 + 1) * 0.4; orbit.r = Math.max(b.x1 - b.x0, b.z1 - b.z0, (b.y1 + 1) * 1.2) * 1.6 + 20;
@@ -303,6 +327,7 @@
     refreshAfter(rec, grow); markDirty(); return n;
   }
   function refreshAfter(rec, force) {
+    gridLater();
     const n = rec.length / 5; let ok = !force && n < 6000;
     if (ok) { for (let i = 0; i < rec.length && ok; i += 5) ok = touch(rec[i], rec[i + 1], rec[i + 2]); }
     if (ok) { flushView(); redraw(); } else rebuild();
@@ -558,7 +583,7 @@
   });
   canvas.addEventListener('pointermove', e => {
     if (fp.on) return;
-    if (!drag) { if (vox && CAN && !hoverQ) { hoverQ = true; const x = e.clientX, y = e.clientY; requestAnimationFrame(() => { hoverQ = false; if (drag || fp.on) return; showAim(aimMouse(x, y)); redraw(); }); } return; }
+    if (!drag) { if (vox && !hoverQ) { hoverQ = true; const x = e.clientX, y = e.clientY; requestAnimationFrame(() => { hoverQ = false; if (drag || fp.on) return; const a = aimMouse(x, y); if (CAN) showAim(a); hoverInfo(a); redraw(); }); } return; }
     if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true;
     if (drag.paint) { const a = aimMouse(e.clientX, e.clientY), k = a ? a.x + ',' + a.y + ',' + a.z : ''; if (a && k !== drag.lastKey) { drag.lastKey = k; useTool(a, 0); } showAim(a); return; }
     if (drag.moved) { orbit.th += (e.clientX - drag.x) * 0.008; orbit.ph = Math.min(1.55, Math.max(0.05, orbit.ph - (e.clientY - drag.y) * 0.008)); redraw(); }
@@ -647,12 +672,20 @@
     $('hud').innerHTML = fp.on
       ? (fp.locked ? `<b>W</b><b>A</b><b>S</b><b>D</b> · <b>Space</b>/<b>Shift</b> вверх/вниз · <b>R</b> или двойное <b>W</b> — быстрее · <b>F</b> полёт/ходьба · ${t} · <b>1–9</b> блок · <b>T</b> или <b>/</b> — команда · <b>Esc</b> — выйти<br><span id="fpPos"></span>`
         : 'Мышь отпущена. <b>Кликни по 3D</b>, чтобы продолжить, или «Выйти».')
-      : `Тяни мышью — вращать · колесо — приблизить · ${tool === 'brush' ? 'тяни левой — красить, правой — вращать' : t} · <b>B</b>/<b>N</b>/<b>V</b> — инструмент · <b>Ctrl+Z</b> — отменить · <b>/</b> — команда`;
+      : `Тяни мышью — вращать · колесо — приблизить · ${tool === 'brush' ? 'тяни левой — красить, правой — вращать' : t} · <b>B</b>/<b>N</b>/<b>V</b> — инструмент · <b>Ctrl+Z</b> — отменить · <b>/</b> — команда<br><span id="hoverPos"></span>`;
   }
-  function hudPos() { const el = document.getElementById('fpPos'); if (el) el.textContent = `X ${Math.floor(fp.x)} · Y ${Math.floor(fp.y)} · Z ${Math.floor(fp.z)}${fp.fly ? ' · полёт' : ''}`; }
+  function hoverInfo(a) {
+    const el = document.getElementById('hoverPos'); if (!el) return;
+    if (!a) { el.textContent = ''; return; }
+    const p = a.ground ? [a.px, 0, a.pz] : [a.x, a.y, a.z], [ox, oz] = gridOff();
+    el.textContent = `под курсором: X ${p[0]} · Y ${p[1]} · Z ${p[2]} от центра · чанк ${Math.floor((p[0] + ox) / 16)}, ${Math.floor((p[2] + oz) / 16)}${a.ground ? '' : ' · ' + VX.label(vox.name(a.x, a.y, a.z))}`;
+  }
+  function hudPos() { const el = document.getElementById('fpPos'); if (el) { const [ox, oz] = gridOff(); el.textContent = `X ${Math.floor(fp.x)} · Y ${Math.floor(fp.y)} · Z ${Math.floor(fp.z)} от центра модели · чанк ${Math.floor((Math.floor(fp.x) + ox) / 16)}, ${Math.floor((Math.floor(fp.z) + oz) / 16)}${fp.fly ? ' · полёт' : ''}`; } }
 
   /* ================= start ================= */
   setTool('block'); renderHotbar(); helpText();
+  $('surfOn').checked = App.pref('struct.surfGrid', true);
+  $('surfOn').onchange = e => { App.setPref('struct.surfGrid', e.target.checked); drawSurfGrid(); };
   if (location.hash === '#test') Object.assign(App, { _ed: { fp, orbit, run: runSafe, get vox() { return vox; }, sel, apply, undo, redo, aimCenter, useTool, setTool, brush, saveNow, get dirty() { return dirty; }, select } });
   resize(); renderList();
   const first = defs().find(d => isModel(d)) || defs()[0]; if (first) await select(first.id); else renderEditor();

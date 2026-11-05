@@ -171,7 +171,17 @@
     },
     roleBadge(r) { return r && r !== 'guest' ? `<span class="role role-${r}">${ROLE_RU[r]}</span>` : ''; },
     text(s) { return esc(s).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener nofollow">$1</a>').replace(/\n/g, '<br>'); },
-    every(fn, ms) { let h = 0; const tick = async () => { if (!document.hidden) { try { await fn(); } catch (e) { } } h = setTimeout(tick, ms); }; h = setTimeout(tick, ms); document.addEventListener('visibilitychange', () => { if (!document.hidden) { clearTimeout(h); tick(); } }); },
+    // repeat fn every ms while the tab is visible; one chain only (returning to the tab while a request is running must not start a second one)
+    every(fn, ms) {
+      let h = 0, busy = false;
+      const run = async () => {
+        clearTimeout(h); h = 0; if (busy) return;
+        if (!document.hidden) { busy = true; try { await fn(); } catch (e) { } busy = false; }
+        clearTimeout(h); h = setTimeout(run, ms);
+      };
+      h = setTimeout(run, ms);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy) run(); });
+    },
 
     gh: {
       get() {
@@ -510,7 +520,7 @@
     if (!def) return null;
     if (def.kind === 'temple' || def.kind === 'lotus' || def.kind === 'voxel') {   // block model: centre in the chunk's block 8, 8, turned by rot × 90°
       const N = App.TEMPLE_N, w = def.bw || 2 * N + 1, d = def.bd || 2 * N + 1, lx = def.bw ? def.vx0 : -N, lz = def.bd ? def.vz0 : -N;
-      const ox = s.cx * 16 + 8, oz = s.cz * 16 + 8, q = ((s.rot || 0) % 4 + 4) % 4, c = [1, 0, -1, 0][q], sn = [0, 1, 0, -1][q];
+      const ox = s.cx * 16 + 8 + (s.dx || 0), oz = s.cz * 16 + 8 + (s.dz || 0), q = ((s.rot || 0) % 4 + 4) % 4, c = [1, 0, -1, 0][q], sn = [0, 1, 0, -1][q];
       const ps = [[lx, lz], [lx + w, lz], [lx, lz + d], [lx + w, lz + d]].map(([u, v]) => [u * c - v * sn, u * sn + v * c]);
       const xs = ps.map(p => p[0]), zs = ps.map(p => p[1]);
       return { x0: ox + Math.min(...xs), x1: ox + Math.max(...xs), z0: oz + Math.min(...zs), z1: oz + Math.max(...zs), ox, oz };

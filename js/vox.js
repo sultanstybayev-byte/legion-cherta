@@ -190,6 +190,41 @@
   };
   VX.rgb = name => hexToRgb(VX.colorOf(name));
 
+  /* ---------- chunk grid lying on the surface ---------- */
+  // top of every column: y of the highest block + 1 (0 = empty column)
+  VX.heightMap = function (vox) {
+    const { w, h, d, data } = vox, out = new Int16Array(w * d);
+    for (let c = 0; c < d; c++) for (let a = 0; a < w; a++) { for (let y = h - 1; y >= 0; y--) if (data[(y * d + c) * w + a]) { out[c * w + a] = y + 1; break; } }
+    return out;
+  };
+  // line segments [x, y, z, x, y, z, …] along chunk borders (x + off ≡ 0 mod 16), following hgt(x, z); only over built columns
+  VX.chunkGridLines = function (hgt, x0, x1, z0, z1, offX, offZ, lift) {
+    const pts = [], L = lift == null ? 0.08 : lift, first = (v0, off) => Math.ceil((v0 + off) / 16) * 16 - off;
+    for (let X = first(x0, offX); X <= x1; X += 16) {
+      let prev = null;
+      for (let z = z0; z < z1; z++) {
+        const hh = Math.max(hgt(X - 1, z), hgt(X, z));
+        if (prev !== null && prev !== hh && (prev || hh)) pts.push(X, prev + L, z, X, hh + L, z);
+        if (hh) pts.push(X, hh + L, z, X, hh + L, z + 1); prev = hh;
+      }
+    }
+    for (let Z = first(z0, offZ); Z <= z1; Z += 16) {
+      let prev = null;
+      for (let x = x0; x < x1; x++) {
+        const hh = Math.max(hgt(x, Z - 1), hgt(x, Z));
+        if (prev !== null && prev !== hh && (prev || hh)) pts.push(x, prev + L, Z, x, hh + L, Z);
+        if (hh) pts.push(x, hh + L, Z, x + 1, hh + L, Z); prev = hh;
+      }
+    }
+    return pts;
+  };
+  // chunks that hold at least one block: { n, cx0, cx1, cz0, cz1 } (chunk numbers relative to the given offset)
+  VX.chunksUsed = function (hgt, x0, x1, z0, z1, offX, offZ) {
+    const set = new Set(); let a0 = 1e9, a1 = -1e9, b0 = 1e9, b1 = -1e9;
+    for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) if (hgt(x, z)) { const cx = Math.floor((x + offX) / 16), cz = Math.floor((z + offZ) / 16); set.add(cx + ',' + cz); if (cx < a0) a0 = cx; if (cx > a1) a1 = cx; if (cz < b0) b0 = cz; if (cz > b1) b1 = cz; }
+    return { n: set.size, cx0: a0, cx1: a1, cz0: b0, cz1: b1 };
+  };
+
   /* ---------- symmetry ---------- */
   // images of a column (x, z) under the structure's symmetry: n rotations about the centre, optionally mirrored
   VX.symImages = function (x, z, sym) {

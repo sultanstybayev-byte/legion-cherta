@@ -224,7 +224,7 @@
         placeMesh(o, def, s);
         o.visible = !hidden; o.userData.sid = s.id; scene.add(o); meshes.set(s.id, o);
       }
-      drawSelBox(); renderStructs(); renderZones(); redraw();
+      drawSelBox(); buildSurfGrid(); renderStructs(); renderZones(); redraw();
     };
     if (wantLotus) { $('busy').hidden = false; setTimeout(async () => { for (const st of need) { const d = defOf(st.def); if (isModel(d)) { try { await VX.loadModel(d); } catch (e) { console.warn(e); } } } go(); $('busy').hidden = true; }, 30); } else go();
   }
@@ -240,6 +240,28 @@
     selBox.position.set((fp.x0 + fp.x1) / 2, (h + 1) / 2, (fp.z0 + fp.z1) / 2); selBox.renderOrder = 6; scene.add(selBox);
   }
   // which structure covers a block column, and the solid test used for picking
+  // top of a world column inside a placed structure (0 if empty)
+  function topFn(s) {
+    const def = defOf(s.def); if (!def) return () => 0; const fp = App.footprint(def, s);
+    if (!isModel(def)) return (x, z) => (x >= fp.x0 && x < fp.x1 && z >= fp.z0 && z < fp.z1) ? def.h : 0;
+    const c = lotusCache.get(def.id); if (!c) return () => 0;
+    const v = c.vox, hm = c.hm || (c.hm = VX.heightMap(v)), a = (s.rot || 0) * Math.PI / 2, ca = Math.round(Math.cos(a)), sa = Math.round(Math.sin(a));
+    return (x, z) => { if (x < fp.x0 || x >= fp.x1 || z < fp.z0 || z >= fp.z1) return 0; const wx = x + .5 - fp.ox, wz = z + .5 - fp.oz, lx = Math.floor(wx * ca + wz * sa), lz = Math.floor(-wx * sa + wz * ca), i = lx - v.x0, k = lz - v.z0;
+      return (i < 0 || k < 0 || i >= v.w || k >= v.d) ? 0 : hm[k * v.w + i]; };
+  }
+  // chunk grid lying on top of the structures, so the covered chunks are visible
+  let surfGrid = null;
+  function buildSurfGrid() {
+    if (surfGrid) { scene.remove(surfGrid); surfGrid.geometry.dispose(); surfGrid.material.dispose(); surfGrid = null; }
+    if (!App.pref('plan.surfGrid', true) || App.pref('plan.hidden', false)) { redraw(); return; }
+    const pts = [];
+    for (const s of insts()) { const def = defOf(s.def); if (!def) continue; const fp = App.footprint(def, s), h = topFn(s); for (const v of VX.chunkGridLines(h, fp.x0, fp.x1, fp.z0, fp.z1, 0, 0, 0.12)) pts.push(v); }
+    if (!pts.length) return;
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    surfGrid = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: new THREE.Color(css('--accent') || '#e07b2a'), transparent: true, opacity: .85 })); surfGrid.renderOrder = 3; scene.add(surfGrid); redraw();
+  }
+  const platformCentre = () => { const pl = P().platform; return [(pl.cx0 + pl.size / 2) * 16, (pl.cz0 + pl.size / 2) * 16]; };
+  const fmtOff = v => (v > 0 ? '+' : v < 0 ? '−' : '') + String(Math.abs(v)).replace('.', ',');
   function solidAt(x, y, z) {
     for (const s of insts()) {
       const def = defOf(s.def); if (!def) continue; const fp = App.footprint(def, s);
@@ -267,7 +289,11 @@
     }).join('') : '<div class="empty">На платформе пока пусто. Выбери структуру выше и нажми «Поставить».</div>';
     const s = list.find(q => q.id === selStruct), def = s && defOf(s.def);
     $('structEdit').hidden = !s || !CAN; $('structEdit').style.display = $('structEdit').hidden ? 'none' : 'flex';
-    if (s && def) { const fp = App.footprint(def, s); $('structInfo').innerHTML = `<b>${esc(def.name)}</b><br>центр X ${sgn(Math.floor(fp.ox))} · Z ${sgn(Math.floor(fp.oz))}<br>чанки X ${sgn(App.chunkOf(fp.x0))}…${sgn(App.chunkOf(fp.x1 - 1))}, Z ${sgn(App.chunkOf(fp.z0))}…${sgn(App.chunkOf(fp.z1 - 1))}`; }
+    if (s && def) {
+      const fp = App.footprint(def, s), [pcx, pcz] = platformCentre(), mx = (fp.x0 + fp.x1) / 2, mz = (fp.z0 + fp.z1) / 2, offx = mx - pcx, offz = mz - pcz;
+      const used = VX.chunksUsed(topFn(s), fp.x0, fp.x1, fp.z0, fp.z1, 0, 0);
+      $('structInfo').innerHTML = `<b>${esc(def.name)}</b> · ${fp.x1 - fp.x0}×${fp.z1 - fp.z0} блоков<br>центр в мире X ${String(mx).replace('.', ',')} · Z ${String(mz).replace('.', ',')}<br>от центра платформы: X ${fmtOff(offx)} · Z ${fmtOff(offz)}${!offx && !offz ? ' — ровно по центру' : ''}<br>занимает чанков: ${used.n}${used.n ? ` (X ${sgn(used.cx0)}…${sgn(used.cx1)}, Z ${sgn(used.cz0)}…${sgn(used.cz1)})` : ''}`;
+    }
     else $('structInfo').textContent = list.length ? (CAN ? 'Структуры закреплены. Двигать — стрелками или включи «Двигать мышью». Клик по строке — выбрать.' : 'Клик по строке — показать.') : '';
   }
   function selectStruct(id, fly) {
@@ -303,8 +329,19 @@
   $('structToSel').onclick = () => {
     if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct); const cs = selChunks();
     if (!s) return; if (cs.length !== 1) { App.toast('Выбери на платформе один чанк — туда встанет структура'); return; }
-    s.cx = cs[0][0]; s.cz = cs[0][1]; App.save('structures'); syncStructures();
+    s.cx = cs[0][0]; s.cz = cs[0][1]; s.dx = 0; s.dz = 0; App.save('structures'); syncStructures();
   };
+  $('structCentre').onclick = () => {
+    if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
+    const fp = App.footprint(def, s), [pcx, pcz] = platformCentre(), ddx = Math.round(pcx - (fp.x0 + fp.x1) / 2), ddz = Math.round(pcz - (fp.z0 + fp.z1) / 2);
+    if (isModel(def)) { const tx = s.cx * 16 + (s.dx || 0) + ddx, tz = s.cz * 16 + (s.dz || 0) + ddz; s.cx = Math.round(tx / 16); s.dx = tx - s.cx * 16; s.cz = Math.round(tz / 16); s.dz = tz - s.cz * 16; }
+    else { s.cx += Math.round(ddx / 16); s.cz += Math.round(ddz / 16); }
+    App.save('structures'); syncStructures();
+    const f2 = App.footprint(def, s), ox = (f2.x0 + f2.x1) / 2 - pcx, oz = (f2.z0 + f2.z1) / 2 - pcz;
+    App.toast(!ox && !oz ? 'Структура ровно по центру платформы' : `Ближе нельзя: от центра X ${fmtOff(ox)} · Z ${fmtOff(oz)}${isModel(def) ? ' (у модели нечётная ширина)' : ' (заготовка двигается по чанкам)'}`, 4000);
+  };
+  $('surfGrid').checked = App.pref('plan.surfGrid', true);
+  $('surfGrid').onchange = e => { App.setPref('plan.surfGrid', e.target.checked); buildSurfGrid(); };
   let sDelArm = 0;
   $('structDel').onclick = () => {
     if (!CAN && deny()) return;
@@ -314,7 +351,7 @@
   $('dragMove').checked = App.pref('plan.dragMove', false);
   $('dragMove').onchange = e => { App.setPref('plan.dragMove', e.target.checked); App.toast(e.target.checked ? 'Теперь структуру можно зажать в 3D и перетащить. Не забудь выключить.' : 'Структуры закреплены: мышь только крутит камеру.', 3500); };
   $('structHidden').checked = App.pref('plan.hidden', false);
-  $('structHidden').onchange = e => { App.setPref('plan.hidden', e.target.checked); for (const o of meshes.values()) o.visible = !e.target.checked; redraw(); };
+  $('structHidden').onchange = e => { App.setPref('plan.hidden', e.target.checked); for (const o of meshes.values()) o.visible = !e.target.checked; buildSurfGrid(); redraw(); };
 
   /* ---------- camera control: drag to look, WASD to fly, click to pick ---------- */
   const look = (dx, dy) => { cam.yaw -= dx * 0.0026; cam.pitch = Math.min(1.5707, Math.max(-1.5707, cam.pitch - dy * 0.0026)); redraw(); };
@@ -370,7 +407,7 @@
     const wasRect = rect && d.moved; rect = null;
     if (wasRect) { renderSel(); return; }
     if (d.paint) { if (d.paint.n) { storeZones(d.paint.def); App.save('structdefs'); renderZones(); } return; }
-    if (d.struct && d.moved) { const st = d.struct; if (st.s.cx !== st.cx || st.s.cz !== st.cz) { App.save('structures'); App.toast(`Перенесено на ${sgn(st.s.cx - st.cx)}, ${sgn(st.s.cz - st.cz)} чанк.`); } renderStructs(); return; }
+    if (d.struct && d.moved) { const st = d.struct; if (st.s.cx !== st.cx || st.s.cz !== st.cz) { buildSurfGrid(); App.save('structures'); App.toast(`Перенесено на ${sgn(st.s.cx - st.cx)}, ${sgn(st.s.cz - st.cz)} чанк.`); } renderStructs(); return; }
     if (!d.moved && Date.now() - d.t < 600 && e.button !== 2) pickAt(e.clientX, e.clientY, d.shift);
   };
   let hoverT = 0;

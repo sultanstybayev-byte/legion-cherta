@@ -74,6 +74,7 @@
       </section>
       <section class="sec">
         <div class="row"><h2 class="grow">Поставленные структуры</h2><label class="chip"><input type="checkbox" id="structHidden"><span class="dot" style="background:var(--muted)"></span>Скрыть в 3D</label></div>
+        <div class="row"><label class="chip"><input type="checkbox" id="surfGrid"><span class="dot" style="background:var(--accent)"></span>Сетка чанков поверх структур</label></div>
         <div class="row" id="dragRow"><label class="chip"><input type="checkbox" id="dragMove"><span class="dot" style="background:var(--accent)"></span>Двигать мышью</label><span class="note grow">выключено — структуры не сдвинешь случайно</span></div>
         <p class="note mono" id="structInfo"></p>
         <div id="structEdit" hidden style="display:flex;flex-direction:column;gap:10px">
@@ -84,6 +85,7 @@
             <button class="btn icon-btn" data-smove="-1,0" aria-label="На запад">←</button>
             <button class="btn icon-btn" data-smove="1,0" aria-label="На восток">→</button>
           </div>
+          <div class="row"><button class="btn primary" id="structCentre">По центру платформы</button></div>
           <div class="row"><button class="btn" id="structRot">Повернуть на 90°</button><button class="btn" id="structToSel">В выбранный чанк</button><button class="btn danger" id="structDel">Убрать с платформы</button></div>
         </div>
       </section>
