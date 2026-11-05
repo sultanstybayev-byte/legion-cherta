@@ -27,7 +27,7 @@
     $('boxDims').hidden = lot; $('lotusOpts').hidden = !lot; $('lotusOpts').style.display = lot ? 'flex' : 'none';
     $('dKind').textContent = lot ? 'Готовая модель из блоков, масштаб один: 1 метр настоящего храма = 2,4 блока.' : 'Заготовка: на платформе это цветной блок нужного размера. Модель сделаем позже.';
     $('dW').value = d.w; $('dD').value = d.d; $('dH').value = d.h;
-    $('dEdits').innerHTML = lot ? '179×179 блоков (около 11×11 чанков), 84 в высоту, диаметр бутона 108. 27 лепестков: 9 бутона, 9 внешних, 9 входных. Внутри пусто: пол, 9 арок в зал, стеклянный потолок под бутоном, стекло в арках входов с проёмом 5×6.' : '';
+    $('dEdits').innerHTML = lot ? '173×173 блока (около 11×11 чанков), 84 в высоту, бутон 108 в диаметре. 27 лепестков: 9 бутона, 9 средних (стоят на стыках входных), 9 низких входных козырьков. Внутри пусто: пол, 9 арок в зал, стеклянный потолок под бутоном, стекло в арках входов с проёмом 5×6.' : '';
     $('dDel').textContent = 'Удалить'; delArm = 0;
     ['dName', 'dColor', 'dNote', 'dW', 'dD', 'dH'].forEach(id => $(id).disabled = !CAN);
   }
@@ -88,7 +88,9 @@
           list.push(x, y, z, m);
         }
         const n = list.length / 4; model = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, n));
-        for (let i = 0; i < n; i++) { tmpM.makeTranslation(list[4 * i] + .5, list[4 * i + 1] + .5, list[4 * i + 2] + .5); model.setMatrixAt(i, tmpM); model.setColorAt(i, tmpC.set(MATS[list[4 * i + 3]] || '#ddd')); }
+        const ZC = 4, ZCOL = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c', '#3498db', '#9b59b6', '#e84393', '#795548', '#34495e'], zm = new Map((d.zones || []).map(z => [z[0] + ',' + z[1] + ',' + z[2], z[3]])), zc = new THREE.Color();
+        for (let i = 0; i < n; i++) { tmpM.makeTranslation(list[4 * i] + .5, list[4 * i + 1] + .5, list[4 * i + 2] + .5); model.setMatrixAt(i, tmpM); tmpC.set(MATS[list[4 * i + 3]] || '#ddd');
+          const z = zm.get(Math.floor(list[4 * i] / ZC) + ',' + Math.floor(list[4 * i + 1] / ZC) + ',' + Math.floor(list[4 * i + 2] / ZC)); if (z != null) tmpC.lerp(zc.set(ZCOL[z] || '#f0f'), .78); model.setColorAt(i, tmpC); }
         model.count = n; wBlocks = dBlocks = 2 * App.TEMPLE_N + 1; h = L.H;
         $('dims').textContent = `${wBlocks}×${dBlocks} блоков, ${h} в высоту, ${fmt(n)} видимых блоков`;
       } else {

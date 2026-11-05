@@ -178,16 +178,33 @@
       if (occ(x + 1, y, z) && occ(x - 1, y, z) && occ(x, y + 1, z) && occ(x, y - 1, z) && occ(x, y, z + 1) && occ(x, y, z - 1)) continue;
       list.push(x, y, z, m);
     }
-    const n = list.length / 4, mat = new Float32Array(n * 16), col = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) { tmpM.makeTranslation(list[4 * i] + .5, list[4 * i + 1] + .5, list[4 * i + 2] + .5); tmpM.toArray(mat, i * 16); tmpC.set(MATS[list[4 * i + 3]] || '#dddddd'); col.set([tmpC.r, tmpC.g, tmpC.b], i * 3); }
-    const out = { key: k, L, n, mat, col }; lotusCache.set(def.id, out); return out;
+    const n = list.length / 4, mat = new Float32Array(n * 16), col = new Float32Array(n * 3), cells = new Map();
+    for (let i = 0; i < n; i++) { tmpM.makeTranslation(list[4 * i] + .5, list[4 * i + 1] + .5, list[4 * i + 2] + .5); tmpM.toArray(mat, i * 16); tmpC.set(MATS[list[4 * i + 3]] || '#dddddd'); col.set([tmpC.r, tmpC.g, tmpC.b], i * 3);
+      const ck = cellKey(list[4 * i], list[4 * i + 1], list[4 * i + 2]); let a = cells.get(ck); if (!a) cells.set(ck, a = []); a.push(i); }
+    const out = { key: k, L, n, mat, col, cells }; lotusCache.set(def.id, out); return out;
   }
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+
+  /* ---------- zones painted on a model with the brush: cubes of ZC×ZC×ZC blocks, stored on the structure ---------- */
+  const ZC = 4, ZONE_COLORS = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c', '#3498db', '#9b59b6', '#e84393', '#795548', '#34495e'];
+  const cellKey = (x, y, z) => Math.floor(x / ZC) + ',' + Math.floor(y / ZC) + ',' + Math.floor(z / ZC);
+  const zoneMaps = new WeakMap();
+  function zonesOf(def) { let m = zoneMaps.get(def); if (!m) { m = new Map(); for (const z of def.zones || []) if (Array.isArray(z) && z.length === 4) m.set(z[0] + ',' + z[1] + ',' + z[2], z[3] | 0); zoneMaps.set(def, m); } return m; }
+  function storeZones(def) { def.zones = [...zonesOf(def)].map(([k, c]) => [...k.split(',').map(Number), c]); }
+  const zc = new THREE.Color(), bc = new THREE.Color();
+  function recolor(def, mesh, keys) {      // keys: changed cells, or null for all
+    const c = lotusCache.get(def.id); if (!c || !mesh.instanceColor) return;
+    const zm = zonesOf(def), arr = mesh.instanceColor.array;
+    const one = (ck, idx) => { const z = zm.get(ck); for (const i of idx) { bc.setRGB(c.col[3 * i], c.col[3 * i + 1], c.col[3 * i + 2]); if (z != null) bc.lerp(zc.set(ZONE_COLORS[z] || '#ff00ff'), .78); arr[3 * i] = bc.r; arr[3 * i + 1] = bc.g; arr[3 * i + 2] = bc.b; } };
+    if (keys) { for (const k of keys) { const idx = c.cells.get(k); if (idx) one(k, idx); } } else for (const [k, idx] of c.cells) one(k, idx);
+    mesh.instanceColor.needsUpdate = true;
+  }
   function makeMesh(def, s) {
     if (isModel(def)) {
       const c = lotusData(def), m = new THREE.InstancedMesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, c.n));
       m.instanceMatrix.array.set(c.mat); m.instanceMatrix.needsUpdate = true;
-      m.instanceColor = new THREE.InstancedBufferAttribute(c.col.slice(), 3); m.count = c.n; return m;
+      m.instanceColor = new THREE.InstancedBufferAttribute(c.col.slice(), 3); m.count = c.n; m.userData.def = def.id;
+      recolor(def, m, null); return m;
     }
     const g = new THREE.Group(), fp = App.footprint(def, s), w = fp.x1 - fp.x0, d = fp.z1 - fp.z0;
     const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: new THREE.Color(def.color), transparent: true, opacity: .55 }));
@@ -206,7 +223,7 @@
         placeMesh(o, def, s);
         o.visible = !hidden; o.userData.sid = s.id; scene.add(o); meshes.set(s.id, o);
       }
-      drawSelBox(); renderStructs(); redraw();
+      drawSelBox(); renderStructs(); renderZones(); redraw();
     };
     if (wantLotus) { $('busy').hidden = false; setTimeout(() => { go(); $('busy').hidden = true; }, 30); } else go();
   }
@@ -253,7 +270,7 @@
     else $('structInfo').textContent = list.length ? (CAN ? 'Зажми структуру в 3D мышью и тяни — она переедет по чанкам. Клик по строке — выбрать.' : 'Клик по строке — показать.') : '';
   }
   function selectStruct(id, fly) {
-    selStruct = id; drawSelBox(); renderStructs(); showTab('structs');
+    selStruct = id; drawSelBox(); renderStructs(); renderZones(); showTab('structs');
     const s = insts().find(q => q.id === id), def = s && defOf(s.def);
     if (fly && def) { const fp = App.footprint(def, s), sz = Math.max(fp.x1 - fp.x0, fp.z1 - fp.z0); cam.x = fp.ox + sz * .5; cam.z = fp.oz + sz * 1.3; cam.y = sz * .6 + 10; const dx = fp.ox - cam.x, dz = fp.oz - cam.z, dy = 10 - cam.y; cam.yaw = Math.atan2(-dx, -dz); cam.pitch = Math.atan2(dy, Math.hypot(dx, dz)); }
     redraw();
@@ -311,6 +328,11 @@
     if (e.pointerType === 'touch') { touches.set(e.pointerId, [e.clientX, e.clientY]); if (touches.size === 2) { const [a, b] = [...touches.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); } }
     canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, id: e.pointerId, t: Date.now(), moved: false, shift: e.shiftKey || e.ctrlKey || e.metaKey }; canvas.style.cursor = rectMode ? 'crosshair' : 'grabbing';
     if (rectMode && e.button === 0 && e.pointerType !== 'touch' || rectMode && e.pointerType === 'touch' && touches.size === 1) { const c = chunkAt(e.clientX, e.clientY); if (c) rect = { a: c, keep: drag.shift ? new Set(sel) : new Set() }; }
+    else if (brush.on && CAN && e.button === 0 && touches.size <= 1) {   // brush: paint zones while the button is held
+      const h = rayHit(e.clientX, e.clientY, true);
+      if (h && h.s && isModel(defOf(h.s.def))) { drag.paint = { def: defOf(h.s.def), n: 0 }; paintAt(h, drag.paint); if (selStruct !== h.s.id) { selStruct = h.s.id; drawSelBox(); renderStructs(); renderZones(); showTab('structs'); } }
+      else if (h && h.s) App.toast('Кистью красятся модели из блоков. Заготовки пока — просто цветные блоки.', 3500);
+    }
     else if (CAN && e.button === 0 && touches.size <= 1) {   // press on a structure: drag it over the chunks
       const h = rayHit(e.clientX, e.clientY, true);
       if (h && h.s) { const p0 = planeAt(e.clientX, e.clientY, h.y + .5); if (p0) drag.struct = { s: h.s, cx: h.s.cx, cz: h.s.cz, y: h.y + .5, p0 }; }
@@ -321,9 +343,14 @@
     if (!drag || drag.id !== e.pointerId) return;
     if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 5) drag.moved = true;
     if (rect) { if (drag.moved) { const c = chunkAt(e.clientX, e.clientY); if (c) applyRect(c); } drag.x = e.clientX; drag.y = e.clientY; return; }
+    if (drag.paint) {
+      if (!drag.paint.raf) { const x = e.clientX, y = e.clientY; drag.paint.raf = requestAnimationFrame(() => { if (!drag || !drag.paint) return; drag.paint.raf = 0;
+        const h = rayHit(x, y, true); if (h && h.s && defOf(h.s.def) === drag.paint.def) paintAt(h, drag.paint); }); }
+      return;
+    }
     if (drag.struct) {
       if (!drag.moved) return; const st = drag.struct, s = st.s, def = defOf(s.def);
-      if (!st.started) { st.started = true; canvas.style.cursor = 'move'; if (selStruct !== s.id) { selStruct = s.id; drawSelBox(); renderStructs(); showTab('structs'); } }
+      if (!st.started) { st.started = true; canvas.style.cursor = 'move'; if (selStruct !== s.id) { selStruct = s.id; drawSelBox(); renderStructs(); renderZones(); showTab('structs'); } }
       const p = planeAt(e.clientX, e.clientY, st.y); if (!p || !def) return;
       const cx = st.cx + Math.round((p.x - st.p0.x) / 16), cz = st.cz + Math.round((p.z - st.p0.z) / 16);
       if (cx !== s.cx || cz !== s.cz) { s.cx = cx; s.cz = cz; const o = meshes.get(s.id); if (o) placeMesh(o, def, s); drawSelBox(); redraw();
@@ -338,12 +365,13 @@
     const d = drag; drag = null; canvas.style.cursor = rectMode ? 'crosshair' : 'grab';
     const wasRect = rect && d.moved; rect = null;
     if (wasRect) { renderSel(); return; }
+    if (d.paint) { if (d.paint.n) { storeZones(d.paint.def); App.save('structdefs'); renderZones(); } return; }
     if (d.struct && d.moved) { const st = d.struct; if (st.s.cx !== st.cx || st.s.cz !== st.cz) { App.save('structures'); App.toast(`Перенесено на ${sgn(st.s.cx - st.cx)}, ${sgn(st.s.cz - st.cz)} чанк.`); } renderStructs(); return; }
     if (!d.moved && Date.now() - d.t < 600 && e.button !== 2) pickAt(e.clientX, e.clientY, d.shift);
   };
   let hoverT = 0;
   canvas.addEventListener('pointermove', e => {
-    if (drag || !CAN || rectMode || e.pointerType === 'touch' || !insts().length) return;
+    if (drag || !CAN || rectMode || brush.on || e.pointerType === 'touch' || !insts().length) return;
     const now = performance.now(); if (now - hoverT < 90) return; hoverT = now;
     canvas.style.cursor = rayHit(e.clientX, e.clientY, true) ? 'move' : 'grab';
   });
@@ -359,7 +387,57 @@
       if (x >= pl.cx0 && z >= pl.cz0 && x < pl.cx0 + pl.size && z < pl.cz0 + pl.size) sel.add(key(x, z));
     colorGround(); $('selCount').textContent = String(sel.size);
   }
-  $('rectBtn').onclick = () => { rectMode = !rectMode; $('rectBtn').setAttribute('aria-pressed', String(rectMode)); canvas.style.cursor = rectMode ? 'crosshair' : 'grab'; App.toast(rectMode ? 'Тяни мышью по платформе, чтобы выделить прямоугольник чанков. Shift — добавить к выбранным.' : 'Выделение рамкой выключено', 3500); };
+  /* brush */
+  const brush = { on: false, color: 0, erase: false, size: 1 };
+  function paintAt(h, st) {
+    const s = h.s, def = defOf(s.def), fp = App.footprint(def, s), a = (s.rot || 0) * Math.PI / 2, wx = h.x + .5 - fp.ox, wz = h.z + .5 - fp.oz;
+    const lx = Math.floor(wx * Math.cos(a) + wz * Math.sin(a) + 1e-6), lz = Math.floor(-wx * Math.sin(a) + wz * Math.cos(a) + 1e-6);
+    const cx = Math.floor(lx / ZC), cy = Math.floor(h.y / ZC), cz = Math.floor(lz / ZC), R = brush.size - 1, zm = zonesOf(def), keys = [];
+    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) for (let dz = -R; dz <= R; dz++) {
+      if (dx * dx + dy * dy + dz * dz > R * R + .5) continue;
+      const k = (cx + dx) + ',' + (cy + dy) + ',' + (cz + dz);
+      if (brush.erase) { if (zm.delete(k)) keys.push(k); } else if (zm.get(k) !== brush.color) { zm.set(k, brush.color); keys.push(k); }
+    }
+    if (!keys.length) return; st.n += keys.length;
+    for (const o of meshes.values()) if (o.userData.def === def.id) recolor(def, o, keys);
+    redraw();
+  }
+  function setBrush(on) {
+    brush.on = on; $('brushBtn').setAttribute('aria-pressed', String(on)); $('brushBar').hidden = !on;
+    if (on && rectMode) $('rectBtn').click();
+    canvas.style.cursor = on ? 'crosshair' : 'grab';
+    if (on) App.toast('Зажми мышь на структуре и води — зона закрашивается кубами 4×4×4. Мимо структуры — обычный обзор.', 4500);
+  }
+  $('brushBtn').onclick = () => { if (!CAN && deny()) return; setBrush(!brush.on); };
+  $('brushSw').innerHTML = ZONE_COLORS.map((c, i) => `<button type="button" style="background:${c}" data-zi="${i}" aria-label="Зона ${i + 1}"></button>`).join('');
+  const syncBrush = () => { $('brushSw').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(!brush.erase && +b.dataset.zi === brush.color))); $('brushErase').setAttribute('aria-pressed', String(brush.erase)); };
+  $('brushSw').onclick = e => { const b = e.target.closest('[data-zi]'); if (!b) return; brush.color = +b.dataset.zi; brush.erase = false; syncBrush(); };
+  $('brushErase').onclick = () => { brush.erase = !brush.erase; syncBrush(); };
+  $('brushSize').onchange = e => { brush.size = +e.target.value; };
+  brush.size = +$("brushSize").value;
+  syncBrush();
+  // zone legend for the selected structure: colour, size, name
+  function renderZones() {
+    const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def), box = $('zoneList');
+    if (!def || !isModel(def)) { $('zoneSec').hidden = true; return; }
+    const zm = zonesOf(def), cnt = new Map(); for (const c of zm.values()) cnt.set(c, (cnt.get(c) || 0) + 1);
+    $('zoneSec').hidden = false;
+    box.innerHTML = cnt.size ? [...cnt].sort((a, b) => a[0] - b[0]).map(([c, n]) => `<div class="row" style="gap:8px"><span style="width:18px;height:18px;border-radius:5px;background:${ZONE_COLORS[c]};flex:none"></span>
+      <input type="text" class="grow" data-zname="${c}" maxlength="40" value="${esc((def.zoneNames || {})[c] || '')}" placeholder="Зона ${c + 1}" ${CAN ? '' : 'disabled'}><span class="note mono">${n} куб.</span>
+      ${CAN ? `<button class="btn sm" data-zclear="${c}" title="Стереть зону">✕</button>` : ''}</div>`).join('')
+      : `<p class="note">Зон пока нет. ${CAN ? 'Включи «Кисть» сверху над 3D, выбери цвет и води по структуре.' : ''}</p>`;
+  }
+  $('zoneList').addEventListener('change', e => {
+    const i = e.target.closest('[data-zname]'); if (!i) return; const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
+    def.zoneNames = Object.assign({}, def.zoneNames, { [i.dataset.zname]: i.value.trim() }); App.save('structdefs');
+  });
+  $('zoneList').addEventListener('click', e => {
+    const b = e.target.closest('[data-zclear]'); if (!b) return; const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
+    const c = +b.dataset.zclear, zm = zonesOf(def), keys = []; for (const [k, v] of zm) if (v === c) { zm.delete(k); keys.push(k); }
+    for (const o of meshes.values()) if (o.userData.def === def.id) recolor(def, o, keys);
+    storeZones(def); App.save('structdefs'); renderZones(); redraw();
+  });
+  $('rectBtn').onclick = () => { if (brush.on && !rectMode) setBrush(false); rectMode = !rectMode; $('rectBtn').setAttribute('aria-pressed', String(rectMode)); canvas.style.cursor = rectMode ? 'crosshair' : 'grab'; App.toast(rectMode ? 'Тяни мышью по платформе, чтобы выделить прямоугольник чанков. Shift — добавить к выбранным.' : 'Выделение рамкой выключено', 3500); };
   canvas.addEventListener('wheel', e => { e.preventDefault(); move(0, 0, 0, -e.deltaY * 0.12); }, { passive: false });
 
   const keys = new Set(); let kbRaf = 0, kbLast = 0;
@@ -515,7 +593,7 @@
   window.addEventListener('themechange', () => { colorGround(); redraw(); });
 
   if (!CAN) {
-    ['plApply', 'plCenter', 'placeRow'].forEach(id => $(id).hidden = true);
+    ['plApply', 'plCenter', 'placeRow', 'brushBtn'].forEach(id => $(id).hidden = true);
     ['plSize', 'plCX', 'plCZ'].forEach(id => $(id).disabled = true);
     $('selInfo').insertAdjacentHTML('afterend', '<p class="note">Размечать чанки и ставить структуры могут модераторы. Ты можешь смотреть и выбирать чанки, чтобы прочитать задачу.</p>');
   }

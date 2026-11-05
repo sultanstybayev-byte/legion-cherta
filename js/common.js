@@ -503,6 +503,6 @@
 
   /* shared constants */
   App.chunkOf = v => Math.floor(v / 16);
-  App.TEMPLE_N = 89; App.TEMPLE_H = 84;     // Храм Лотоса: centre block ± 89, 84 high (see js/temple.js)
+  App.TEMPLE_N = 86; App.TEMPLE_H = 84;     // Храм Лотоса: centre block ± 86, 84 high (see js/temple.js)
   window.App = App;
 })();
