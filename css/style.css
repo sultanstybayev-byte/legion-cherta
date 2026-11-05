@@ -370,3 +370,10 @@ body.walking .cmdbar input:not(:focus){opacity:.55}
 .sblock{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;flex:1}
 .sblock i{width:16px;height:16px;border-radius:4px;display:inline-block}
 .keys kbd,kbd{font:600 12px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;background:var(--bg)}
+
+/* exact X / Y / Z position fields, coloured like the gizmo arrows */
+.posrow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.posrow > .note { grid-column: 1 / -1; }
+.posrow .ax { display: flex; align-items: center; gap: 6px; font: 600 13px/1 var(--mono, "JetBrains Mono", monospace); min-width: 0; }
+.posrow .ax input { width: 100%; min-width: 0; }
+.posrow .ax-x { color: #e74c3c; } .posrow .ax-y { color: #2ecc71; } .posrow .ax-z { color: #3a8ee6; }

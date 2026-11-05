@@ -166,9 +166,10 @@
   const orbit = { th: 0.8, ph: 1.05, r: 200, tx: 0, ty: 20, tz: 0 };
   const fp = { on: false, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, vy: 0, ground: false, fly: true, keys: new Set(), last: 0, raf: 0, locked: false };
   const tmpM = new THREE.Matrix4(), tmpC = new THREE.Color(), geo = new THREE.BoxGeometry(1, 1, 1);
+  const giz = window.Gizmo ? Gizmo.create(scene) : null;    // X / Y / Z arrows on the selected shape or the selected area
   function draw() {
     if (fp.on) { camera.position.set(fp.x, fp.y + 1.62, fp.z); camera.rotation.set(fp.pitch, fp.yaw, 0); }
-    else { camera.position.set(orbit.tx + orbit.r * Math.sin(orbit.ph) * Math.cos(orbit.th), orbit.ty + orbit.r * Math.cos(orbit.ph), orbit.tz + orbit.r * Math.sin(orbit.ph) * Math.sin(orbit.th)); camera.lookAt(orbit.tx, orbit.ty, orbit.tz); }
+    else { camera.position.set(orbit.tx + orbit.r * Math.sin(orbit.ph) * Math.cos(orbit.th), orbit.ty + orbit.r * Math.cos(orbit.ph), orbit.tz + orbit.r * Math.sin(orbit.ph) * Math.sin(orbit.th)); camera.lookAt(orbit.tx, orbit.ty, orbit.tz); if (giz) giz.fit(camera, canvas); }
     scene.background = new THREE.Color(css('--stage') || '#dbe1e5'); renderer.render(scene, camera);
   }
   let queued = false; const redraw = () => { if (queued || fp.on) return; queued = true; requestAnimationFrame(() => { queued = false; draw(); }); };
@@ -422,7 +423,24 @@
     const g = new THREE.Group(), mk = (p, col) => { const m = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.06, 1.06, 1.06)), new THREE.LineBasicMaterial({ color: col, depthTest: false })); m.position.set(p[0] + .5, p[1] + .5, p[2] + .5); m.renderOrder = 8; g.add(m); };
     if (sel.p1) mk(sel.p1, 0xe74c3c); if (sel.p2) mk(sel.p2, 0x3498db);
     const s = selBox(); if (s) { const w = s.x1 - s.x0 + 1, h = s.y1 - s.y0 + 1, d = s.z1 - s.z0 + 1, m = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w + .04, h + .04, d + .04)), new THREE.LineBasicMaterial({ color: 0xf1c40f, depthTest: false })); m.position.set(s.x0 + w / 2, s.y0 + h / 2, s.z0 + d / 2); m.renderOrder = 8; g.add(m); }
-    selMesh = g; scene.add(g); $('selInfo').textContent = s ? selSize() : (sel.p1 || sel.p2 ? 'нужна вторая точка' : ''); redraw();
+    selMesh = g; scene.add(g); $('selInfo').textContent = s ? selSize() : (sel.p1 || sel.p2 ? 'нужна вторая точка' : ''); updateGiz(); redraw();
+  }
+  // move the blocks of the selected area by a vector (like //move), the selection goes with them
+  function moveSel(v) {
+    const s = selBox(); if (!s || !vox || (!v[0] && !v[1] && !v[2])) return 0; const map = new Map();
+    forSel(s, (x, y, z) => { if (vox.get(x, y, z)) map.set(x + ',' + y + ',' + z, [x, y, z, 'minecraft:air']); });
+    forSel(s, (x, y, z) => { const id = vox.get(x, y, z); if (id) { const a = x + v[0], b = y + v[1], c = z + v[2]; if (b >= 0) map.set(a + ',' + b + ',' + c, [a, b, c, vox.palette[id]]); } });
+    const n = apply([...map.values()], 'сдвиг выделения');
+    sel.p1 = [s.x0 + v[0], s.y0 + v[1], s.z0 + v[2]]; sel.p2 = [s.x1 + v[0], s.y1 + v[1], s.z1 + v[2]]; drawSel(); return n;
+  }
+  // where the arrows stand: the selected shape, else the top of the selected area
+  function updateGiz() {
+    if (!giz || giz.active) return;
+    const q = typeof curShape === 'function' ? curShape() : null, b = selBox();
+    if (fp.on || !CAN || !vox || xf) giz.hide();
+    else if (q && !q.hidden && $('sGhost').checked) giz.show(q.pos);
+    else if (b) giz.show([(b.x0 + b.x1 + 1) / 2, b.y1 + 2, (b.z0 + b.z1 + 1) / 2]);
+    else giz.hide();
   }
 
   /* ================= WorldEdit commands ================= */
@@ -662,7 +680,7 @@
     if (ghost) { scene.remove(ghost); ghost.geometry.dispose(); ghost.material.dispose(); ghost = null; }
     if (gizmo) { scene.remove(gizmo); gizmo.traverse(x => { if (x.geometry) x.geometry.dispose(); if (x.material) x.material.dispose(); }); gizmo = null; }
     ghostMap = new Map();
-    if (!vox || !$('sGhost').checked) { redraw(); return; }
+    if (!vox || !$('sGhost').checked) { updateGiz(); redraw(); return; }
     const list = [], sym = symActive() ? symOf(defOf(cur)) : null, acc = new THREE.Color(css('--accent') || '#e07b2a');
     for (const q of shapes()) {
       if (q.hidden) continue; const on = q.id === selShape, base = new THREE.Color(q.mode === 'cut' ? '#e74c3c' : VX.colorOf(q.block || block()));
@@ -679,7 +697,7 @@
       ghost.renderOrder = 5; scene.add(ghost);
     }
     const q = curShape();
-    if (q && !q.hidden) {
+    if (q && !q.hidden && xf) {
       const g = new THREE.Group(), L = Math.max(...q.size) / 2 + 6, o = new THREE.Vector3(...q.pos), M = SH.rotM(q.rot);
       [[0xe74c3c, 0], [0x2ecc71, 1], [0x3498db, 2]].forEach(([c, i]) => {
         const dir = new THREE.Vector3(M[0][i], M[1][i], M[2][i]), long = xf && xf.axis === i, len = long ? 400 : L;
@@ -689,6 +707,7 @@
       const dot = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false })); dot.position.copy(o); dot.renderOrder = 11; g.add(dot);
       gizmo = g; scene.add(g);
     }
+    if (giz) { if (giz.active && q) giz.show(q.pos); else updateGiz(); }
     redraw();
   }
   function ghostAt(cx, cy) {
@@ -736,6 +755,7 @@
     drawGhostsSoon();
   }
   function confirmXf() { if (!xf) return; xf = null; drawGhosts(); renderShapes(); saveShapesLater(); }
+  const gizStep = (e, shape) => shape && e.shiftKey ? 0.1 : 1;
   function cancelXf() { const q = curShape(); if (xf && q) Object.assign(q, clone(xf.start)); xf = null; drawGhosts(); renderShapes(); }
 
   /* ================= input ================= */
@@ -751,6 +771,12 @@
       return;
     }
     canvas.setPointerCapture(e.pointerId);
+    const gAxis = giz && e.button === 0 ? giz.pick(camera, canvas, e.clientX, e.clientY) : -1;
+    if (gAxis >= 0) {   // drag an arrow: the selected shape, or the blocks of the selected area, move along that axis
+      const q = curShape(), b = selBox(), onShape = !!(q && !q.hidden && $('sGhost').checked);
+      drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, b: 0, moved: true, giz: onShape ? { axis: gAxis, q, start: q.pos.slice(), last: 0 } : { axis: gAxis, box: b, p1: sel.p1.slice(), p2: sel.p2.slice(), last: 0 } };
+      giz.begin(camera, canvas, gAxis, e.clientX, e.clientY); canvas.style.cursor = 'move'; redraw(); return;
+    }
     drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, b: e.button, moved: false, paint: tool === 'brush' && e.button === 0 && !!vox };
     if (drag.paint) { const a = aimMouse(e.clientX, e.clientY); drag.lastKey = a ? a.x + ',' + a.y + ',' + a.z : ''; useTool(a, 0); }
   });
@@ -758,7 +784,16 @@
     mouse.x = e.clientX; mouse.y = e.clientY;
     if (xf) { updateXf(e); return; }
     if (fp.on) return;
-    if (!drag) { if (vox && !hoverQ) { hoverQ = true; const x = e.clientX, y = e.clientY; requestAnimationFrame(() => { hoverQ = false; if (drag || fp.on) return; const a = aimMouse(x, y); if (CAN) showAim(a); hoverInfo(a); redraw(); }); } return; }
+    if (drag && drag.giz) {
+      const g = drag.giz, raw = giz.drag(camera, canvas, e.clientX, e.clientY), st = gizStep(e, !!g.q), n = +(Math.round(raw / st) * st).toFixed(2);
+      if (n === g.last) return; g.last = n;
+      if (g.q) { g.q.pos[g.axis] = +(g.start[g.axis] + n).toFixed(2); drawGhostsSoon(); $('weLog').textContent = `«${g.q.name}» по ${'XYZ'[g.axis]}: ${n > 0 ? '+' : ''}${n} → позиция ${g.q.pos.map(v => +(+v).toFixed(1)).join(' · ')}`; }
+      else { const v = [0, 0, 0]; v[g.axis] = n; sel.p1 = g.p1.map((a, i) => a + v[i]); sel.p2 = g.p2.map((a, i) => a + v[i]); drawSel(); giz.show([(Math.min(sel.p1[0], sel.p2[0]) + Math.max(sel.p1[0], sel.p2[0]) + 1) / 2, Math.max(sel.p1[1], sel.p2[1]) + 2, (Math.min(sel.p1[2], sel.p2[2]) + Math.max(sel.p1[2], sel.p2[2]) + 1) / 2]); $('weLog').textContent = `Выделение по ${'XYZ'[g.axis]}: ${n > 0 ? '+' : ''}${n} бл. — отпусти, чтобы перенести блоки`; }
+      $('weLog').classList.add('on'); return;
+    }
+    if (!drag) {
+      if (giz && giz.visible && !xf) { const a = giz.pick(camera, canvas, e.clientX, e.clientY); if (giz.hover(a)) redraw(); canvas.style.cursor = a >= 0 ? 'pointer' : 'grab'; if (a >= 0) return; }
+      if (vox && !hoverQ) { hoverQ = true; const x = e.clientX, y = e.clientY; requestAnimationFrame(() => { hoverQ = false; if (drag || fp.on) return; const a = aimMouse(x, y); if (CAN) showAim(a); hoverInfo(a); redraw(); }); } return; }
     if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true;
     if (drag.paint) { const a = aimMouse(e.clientX, e.clientY), k = a ? a.x + ',' + a.y + ',' + a.z : ''; if (a && k !== drag.lastKey) { drag.lastKey = k; useTool(a, 0); } showAim(a); return; }
     if (drag.moved) { orbit.th += (e.clientX - drag.x) * 0.008; orbit.ph = Math.min(1.55, Math.max(0.05, orbit.ph - (e.clientY - drag.y) * 0.008)); redraw(); }
@@ -767,6 +802,12 @@
   const up = e => {
     if (stroke) { clearInterval(stroke.timer); stroke = null; }
     if (!drag) return; const d = drag; drag = null;
+    if (d.giz) {
+      giz.end(); canvas.style.cursor = 'grab'; const g = d.giz;
+      if (g.q) { if (g.last) { saveShapesLater(); renderShapes(); } drawGhosts(); }
+      else { sel.p1 = g.p1; sel.p2 = g.p2; const v = [0, 0, 0]; v[g.axis] = g.last; const n = g.last ? moveSel(v) : 0; if (g.last) weLog(`сдвинуто по ${'XYZ'[g.axis]} на ${g.last > 0 ? '+' : ''}${g.last}: ${fmt(n)} бл.${symActive() ? ' (с симметрией)' : ''} · Ctrl+Z — отменить`); else drawSel(); }
+      redraw(); return;
+    }
     if (!d.moved && !d.paint && vox) {
       if (d.b === 0 || d.b === 2) { const g = ghostAt(e.clientX, e.clientY); if (g) { selectShape(g); return; } }
       useTool(aimMouse(e.clientX, e.clientY), d.b);
@@ -819,7 +860,7 @@
     fp.on = true; fp.fly = true; fp.vy = 0; fp.keys.clear();
     const b = vox.bounds() || { x0: 0, x1: 0, z1: 0 }; fp.x = (b.x0 + b.x1 + 1) / 2; fp.z = b.z1 + 6; fp.y = 0; fp.yaw = 0; fp.pitch = -0.1;
     while (hits(fp.x, fp.y, fp.z) && fp.y < 600) fp.y += 1;
-    camera.fov = 70; camera.updateProjectionMatrix(); document.body.classList.add('walking');
+    camera.fov = 70; camera.updateProjectionMatrix(); document.body.classList.add('walking'); if (giz) giz.hide();
     $('walkBtn').textContent = 'Выйти (Esc)'; $('walkBtn').setAttribute('aria-pressed', 'true'); hud();
     lockMouse(); canvas.focus(); fp.last = performance.now(); fp.raf = requestAnimationFrame(tickFP);
   }
@@ -827,7 +868,7 @@
     if (!fp.on) return; fp.on = false; cancelAnimationFrame(fp.raf); fp.keys.clear();
     if (document.pointerLockElement === canvas) document.exitPointerLock();
     camera.fov = 50; camera.updateProjectionMatrix(); document.body.classList.remove('walking');
-    $('walkBtn').textContent = 'Войти внутрь'; $('walkBtn').setAttribute('aria-pressed', 'false'); showAim(null); hud(); draw();
+    $('walkBtn').textContent = 'Войти внутрь'; $('walkBtn').setAttribute('aria-pressed', 'false'); showAim(null); hud(); updateGiz(); draw();
   }
   $('walkBtn').onclick = () => fp.on ? stopFP() : startFP();
   let lockedAt = 0;
@@ -873,7 +914,7 @@
   $('symOn').addEventListener('change', () => drawGhosts());
   $('surfOn').checked = App.pref('struct.surfGrid', true);
   $('surfOn').onchange = e => { App.setPref('struct.surfGrid', e.target.checked); drawSurfGrid(); };
-  if (location.hash === '#test') Object.assign(App, { _ed: { fp, orbit, run: runSafe, get vox() { return vox; }, sel, apply, undo, redo, aimCenter, useTool, setTool, brush, saveNow, shapes, bakeShape, startXf, confirmXf, get selShape() { return selShape; }, mouse, updateXf, get dirty() { return dirty; }, select } });
+  if (location.hash === '#test') Object.assign(App, { _ed: { fp, orbit, run: runSafe, get vox() { return vox; }, sel, apply, undo, redo, aimCenter, useTool, setTool, brush, saveNow, shapes, bakeShape, startXf, confirmXf, get selShape() { return selShape; }, mouse, updateXf, get dirty() { return dirty; }, select, giz, camera, canvas, drawSel } });
   resize(); renderList();
   const first = defs().find(d => isModel(d)) || defs()[0]; if (first) await select(first.id); else renderEditor();
 })();

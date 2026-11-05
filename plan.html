@@ -7,7 +7,7 @@
 <script>/* theme before first paint: saved choice, dark by default */ try { document.documentElement.dataset.theme = localStorage.getItem("mcmap.theme") || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
-<link rel="stylesheet" href="css/style.css?v=1106">
+<link rel="stylesheet" href="css/style.css?v=1107">
 </head>
 <body>
 <div class="app">
@@ -86,6 +86,12 @@
             <button class="btn icon-btn" data-smove="1,0" aria-label="На восток">→</button>
           </div>
           <div class="row"><button class="btn primary" id="structCentre">По центру платформы</button></div>
+          <div class="posrow"><span class="note">Точно, блоков от центра платформы</span>
+            <label class="ax ax-x">X<input type="number" id="posX" step="1"></label>
+            <label class="ax ax-y" title="Высота низа структуры">Y<input type="number" id="posY" step="1" min="-64" max="320"></label>
+            <label class="ax ax-z">Z<input type="number" id="posZ" step="1"></label></div>
+          <div class="row"><span class="note grow">Высота</span><button class="btn sm" data-ynudge="-1">Y −1</button><button class="btn sm" data-ynudge="1">Y +1</button><button class="btn sm" data-ynudge="-16">−16</button><button class="btn sm" data-ynudge="16">+16</button></div>
+          <p class="note">В 3D тяни за стрелки над структурой: <b style="color:#e74c3c">X</b> — восток/запад, <b style="color:#2ecc71">Y</b> — вверх/вниз, <b style="color:#3a8ee6">Z</b> — юг/север. Шаг — 1 блок.</p>
           <div class="row"><button class="btn" id="structRot">Повернуть на 90°</button><button class="btn" id="structToSel">В выбранный чанк</button><button class="btn danger" id="structDel">Убрать с платформы</button></div>
         </div>
       </section>
@@ -120,6 +126,7 @@
 <script src="js/common.js?v=1106"></script>
 <script src="js/temple.js?v=1106"></script>
 <script src="js/vox.js?v=1106"></script>
-<script src="js/plan.js?v=1107"></script>
+<script src="js/gizmo.js?v=1107"></script>
+<script src="js/plan.js?v=1108"></script>
 </body>
 </html>

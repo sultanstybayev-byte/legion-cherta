@@ -28,9 +28,11 @@
   const sun2 = new THREE.DirectionalLight(0xffffff, 0.18); sun2.position.set(-0.5, 0.4, -0.8); scene.add(sun2);
   const cam = { x: 0, y: 120, z: 200, yaw: 0, pitch: -0.5 };
   const tmpM = new THREE.Matrix4(), tmpC = new THREE.Color();
+  const giz = window.Gizmo ? Gizmo.create(scene) : null;     // X / Y / Z arrows on the selected structure
 
   function draw() {
     camera.position.set(cam.x, cam.y, cam.z); camera.rotation.set(cam.pitch, cam.yaw, 0);
+    if (giz) giz.fit(camera, canvas);
     scene.background = new THREE.Color(css('--stage') || '#dbe1e5');
     renderer.render(scene, camera);
     $('camPos').textContent = `Камера: X ${sgn(Math.floor(cam.x))} · Y ${Math.floor(cam.y)} · Z ${sgn(Math.floor(cam.z))}`;
@@ -230,24 +232,34 @@
   }
   function placeMesh(o, def, s) {
     const fp = App.footprint(def, s);
-    if (isModel(def)) { o.position.set(fp.ox, 0, fp.oz); o.rotation.y = -(s.rot || 0) * Math.PI / 2; } else o.position.set((fp.x0 + fp.x1) / 2, 0, (fp.z0 + fp.z1) / 2);
+    if (isModel(def)) { o.position.set(fp.ox, s.dy || 0, fp.oz); o.rotation.y = -(s.rot || 0) * Math.PI / 2; } else o.position.set((fp.x0 + fp.x1) / 2, s.dy || 0, (fp.z0 + fp.z1) / 2);
   }
   function drawSelBox() {
     if (selBox) { scene.remove(selBox); disposeObj(selBox); selBox = null; }
-    const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
-    const fp = App.footprint(def, s), h = isModel(def) ? (lotusCache.get(def.id) || { L: { H: 80 } }).L.H : def.h;
+    const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) { if (giz && !giz.active) giz.hide(); return; }
+    const fp = App.footprint(def, s), h = heightOf(def), dy = s.dy || 0;
     selBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(fp.x1 - fp.x0, h + 1, fp.z1 - fp.z0)), new THREE.LineBasicMaterial({ color: new THREE.Color(css('--accent') || '#e07b2a'), depthTest: false }));
-    selBox.position.set((fp.x0 + fp.x1) / 2, (h + 1) / 2, (fp.z0 + fp.z1) / 2); selBox.renderOrder = 6; scene.add(selBox);
+    selBox.position.set((fp.x0 + fp.x1) / 2, dy + (h + 1) / 2, (fp.z0 + fp.z1) / 2); selBox.renderOrder = 6; scene.add(selBox);
+    if (giz) { if (CAN && !walk.on && !App.pref('plan.hidden', false)) giz.show(gizPos(def, s)); else giz.hide(); }
   }
+  const heightOf = def => isModel(def) ? (lotusCache.get(def.id) || { L: { H: 80 } }).L.H : def.h;
+  const gizPos = (def, s) => { const fp = App.footprint(def, s); return [isModel(def) ? fp.ox : (fp.x0 + fp.x1) / 2, (s.dy || 0) + heightOf(def) + 2, isModel(def) ? fp.oz : (fp.z0 + fp.z1) / 2]; };
+  // move a placement so its centre (the model's 0, 0) lands on world block ox, oz; models move by the block, boxes by the chunk
+  function setCentre(s, def, ox, oz) {
+    if (isModel(def)) { s.cx = Math.floor(ox / 16); s.dx = ox - s.cx * 16 - 8; s.cz = Math.floor(oz / 16); s.dz = oz - s.cz * 16 - 8; }
+    else { const fp = App.footprint(def, s); s.cx += Math.round((ox - (fp.x0 + fp.x1) / 2) / 16); s.cz += Math.round((oz - (fp.z0 + fp.z1) / 2) / 16); }
+  }
+  const clampY = v => Math.max(-64, Math.min(320, Math.round(v)));
   // which structure covers a block column, and the solid test used for picking
   // top of a world column inside a placed structure (0 if empty)
   function topFn(s) {
     const def = defOf(s.def); if (!def) return () => 0; const fp = App.footprint(def, s);
-    if (!isModel(def)) return (x, z) => (x >= fp.x0 && x < fp.x1 && z >= fp.z0 && z < fp.z1) ? def.h : 0;
+    const dy = s.dy || 0;
+    if (!isModel(def)) return (x, z) => (x >= fp.x0 && x < fp.x1 && z >= fp.z0 && z < fp.z1) ? def.h + dy : 0;
     const c = lotusCache.get(def.id); if (!c) return () => 0;
     const v = c.vox, hm = c.hm || (c.hm = VX.heightMap(v)), a = (s.rot || 0) * Math.PI / 2, ca = Math.round(Math.cos(a)), sa = Math.round(Math.sin(a));
     return (x, z) => { if (x < fp.x0 || x >= fp.x1 || z < fp.z0 || z >= fp.z1) return 0; const wx = x + .5 - fp.ox, wz = z + .5 - fp.oz, lx = Math.floor(wx * ca + wz * sa), lz = Math.floor(-wx * sa + wz * ca), i = lx - v.x0, k = lz - v.z0;
-      return (i < 0 || k < 0 || i >= v.w || k >= v.d) ? 0 : hm[k * v.w + i]; };
+      const t = (i < 0 || k < 0 || i >= v.w || k >= v.d) ? 0 : hm[k * v.w + i]; return t ? t + dy : 0; };
   }
   // chunk grid lying on top of the structures, so the covered chunks are visible
   let surfGrid = null;
@@ -270,8 +282,8 @@
         const c = lotusCache.get(def.id); if (!c) continue;
         const a = (s.rot || 0) * Math.PI / 2, wx = x + .5 - fp.ox, wz = z + .5 - fp.oz;
         const lx = Math.floor(wx * Math.cos(a) + wz * Math.sin(a) + 1e-6), lz = Math.floor(-wx * Math.sin(a) + wz * Math.cos(a) + 1e-6);
-        if (c.L.get(lx, y, lz)) return s;
-      } else if (x >= fp.x0 && x < fp.x1 && z >= fp.z0 && z < fp.z1 && y >= 0 && y < def.h) return s;
+        if (c.L.get(lx, y - (s.dy || 0), lz)) return s;
+      } else if (x >= fp.x0 && x < fp.x1 && z >= fp.z0 && z < fp.z1 && y >= (s.dy || 0) && y < (s.dy || 0) + def.h) return s;
     }
     return null;
   }
@@ -285,14 +297,14 @@
     $('placedList').innerHTML = list.length ? list.map(s => {
       const def = defOf(s.def); if (!def) return '';
       const fp = App.footprint(def, s), out = fp.x0 < pl.cx0 * 16 || fp.z0 < pl.cz0 * 16 || fp.x1 > (pl.cx0 + pl.size) * 16 || fp.z1 > (pl.cz0 + pl.size) * 16;
-      return `<div class="item" data-sid="${esc(s.id)}" role="button" tabindex="0" ${s.id === selStruct ? 'style="background:var(--accent-soft)"' : ''}><span style="width:18px;height:18px;border-radius:5px;background:${esc(def.color)}"></span><span class="t">${esc(def.name)}</span><span class="c">центр X ${sgn(Math.floor(fp.ox))} · Z ${sgn(Math.floor(fp.oz))} · чанк ${sgn(s.cx)}, ${sgn(s.cz)}${s.rot ? ' · поворот ' + s.rot * 90 + '°' : ''}${out ? ' · за краем платформы' : ''}</span>${CAN ? `<span class="r"><button class="btn sm danger" data-sdel="${esc(s.id)}">Убрать</button></span>` : ''}</div>`;
+      return `<div class="item" data-sid="${esc(s.id)}" role="button" tabindex="0" ${s.id === selStruct ? 'style="background:var(--accent-soft)"' : ''}><span style="width:18px;height:18px;border-radius:5px;background:${esc(def.color)}"></span><span class="t">${esc(def.name)}</span><span class="c">центр X ${sgn(Math.floor(fp.ox))} · Z ${sgn(Math.floor(fp.oz))}${s.dy ? ' · Y ' + sgn(s.dy) : ''} · чанк ${sgn(s.cx)}, ${sgn(s.cz)}${s.rot ? ' · поворот ' + s.rot * 90 + '°' : ''}${out ? ' · за краем платформы' : ''}</span>${CAN ? `<span class="r"><button class="btn sm danger" data-sdel="${esc(s.id)}">Убрать</button></span>` : ''}</div>`;
     }).join('') : '<div class="empty">На платформе пока пусто. Выбери структуру выше и нажми «Поставить».</div>';
     const s = list.find(q => q.id === selStruct), def = s && defOf(s.def);
     $('structEdit').hidden = !s || !CAN; $('structEdit').style.display = $('structEdit').hidden ? 'none' : 'flex';
-    if (s && def) {
+    if (s && def) { fillPosInputs(s, def);
       const fp = App.footprint(def, s), [pcx, pcz] = platformCentre(), mx = (fp.x0 + fp.x1) / 2, mz = (fp.z0 + fp.z1) / 2, offx = mx - pcx, offz = mz - pcz;
       const used = VX.chunksUsed(topFn(s), fp.x0, fp.x1, fp.z0, fp.z1, 0, 0);
-      $('structInfo').innerHTML = `<b>${esc(def.name)}</b> · ${fp.x1 - fp.x0}×${fp.z1 - fp.z0} блоков<br>центр в мире X ${String(mx).replace('.', ',')} · Z ${String(mz).replace('.', ',')}<br>от центра платформы: X ${fmtOff(offx)} · Z ${fmtOff(offz)}${!offx && !offz ? ' — ровно по центру' : ''}<br>центр в чанке: ${(((mx % 16) + 16) % 16) === 8 && (((mz % 16) + 16) % 16) === 8 ? 'в середине ✓' : 'блок ' + String(((mx % 16) + 16) % 16).replace('.', ',') + ', ' + String(((mz % 16) + 16) % 16).replace('.', ',')}<br>занимает чанков: ${used.n}${used.n ? ` (X ${sgn(used.cx0)}…${sgn(used.cx1)}, Z ${sgn(used.cz0)}…${sgn(used.cz1)})` : ''}`;
+      $('structInfo').innerHTML = `<b>${esc(def.name)}</b> · ${fp.x1 - fp.x0}×${fp.z1 - fp.z0} блоков<br>центр в мире X ${String(mx).replace('.', ',')} · Z ${String(mz).replace('.', ',')}<br>от центра платформы: X ${fmtOff(offx)} · Z ${fmtOff(offz)}${!offx && !offz ? ' — ровно по центру' : ''}<br>низ структуры на высоте Y ${sgn(s.dy || 0)}<br>центр в чанке: ${(((mx % 16) + 16) % 16) === 8 && (((mz % 16) + 16) % 16) === 8 ? 'в середине ✓' : 'блок ' + String(((mx % 16) + 16) % 16).replace('.', ',') + ', ' + String(((mz % 16) + 16) % 16).replace('.', ',')}<br>занимает чанков: ${used.n}${used.n ? ` (X ${sgn(used.cx0)}…${sgn(used.cx1)}, Z ${sgn(used.cz0)}…${sgn(used.cz1)})` : ''}`;
     }
     else $('structInfo').textContent = list.length ? (CAN ? 'Структуры закреплены. Двигать — стрелками или включи «Двигать мышью». Клик по строке — выбрать.' : 'Клик по строке — показать.') : '';
   }
@@ -341,6 +353,18 @@
     App.toast(!ox && !oz ? 'Ровно по центру платформы, центр структуры — в середине чанка'
       : `Центр структуры — в середине чанка; от центра платформы X ${fmtOff(ox)} · Z ${fmtOff(oz)}.${pl.size % 2 === 0 && isModel(def) ? ' У платформы плана чётное число чанков (' + pl.size + '), её центр на углу чанка. Сделай её нечётной (например ' + (pl.size + 1) + ') во вкладке «Платформа» — и будет ровно.' : ''}`, 7000);
   };
+  // exact position: centre offset from the platform centre (X, Z) and the height of the structure's bottom (Y)
+  function posOf(s, def) { const fp = App.footprint(def, s), [pcx, pcz] = platformCentre(); return [(fp.x0 + fp.x1) / 2 - pcx, s.dy || 0, (fp.z0 + fp.z1) / 2 - pcz]; }
+  function fillPosInputs(s, def) { const p = posOf(s, def); ['posX', 'posY', 'posZ'].forEach((id, i) => { if (document.activeElement !== $(id)) $(id).value = String(p[i]); }); $('posX').step = $('posZ').step = isModel(def) ? '1' : '16'; }
+  function movedLive(s, def) { const o = meshes.get(s.id); if (o) placeMesh(o, def, s); drawSelBox(); redraw(); }
+  function movedDone(s, def) { buildSurfGrid(); App.save('structures'); renderStructs(); }
+  ['posX', 'posY', 'posZ'].forEach((id, i) => $(id).addEventListener('change', () => {
+    if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return;
+    const v = Math.round(+$(id).value); if (!Number.isFinite(v)) return; const p = posOf(s, def), fp = App.footprint(def, s);
+    if (i === 1) s.dy = clampY(v); else { const d = v - p[i]; setCentre(s, def, (isModel(def) ? fp.ox : (fp.x0 + fp.x1) / 2) + (i === 0 ? d : 0), (isModel(def) ? fp.oz : (fp.z0 + fp.z1) / 2) + (i === 2 ? d : 0)); }
+    movedLive(s, def); movedDone(s, def);
+  }));
+  document.querySelectorAll('[data-ynudge]').forEach(b => b.onclick = () => { if (!CAN && deny()) return; const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def); if (!def) return; s.dy = clampY((s.dy || 0) + +b.dataset.ynudge); movedLive(s, def); movedDone(s, def); });
   $('surfGrid').checked = App.pref('plan.surfGrid', true);
   $('surfGrid').onchange = e => { App.setPref('plan.surfGrid', e.target.checked); buildSurfGrid(); };
   let sDelArm = 0;
@@ -352,7 +376,7 @@
   $('dragMove').checked = App.pref('plan.dragMove', false);
   $('dragMove').onchange = e => { App.setPref('plan.dragMove', e.target.checked); App.toast(e.target.checked ? 'Теперь структуру можно зажать в 3D и перетащить. Не забудь выключить.' : 'Структуры закреплены: мышь только крутит камеру.', 3500); };
   $('structHidden').checked = App.pref('plan.hidden', false);
-  $('structHidden').onchange = e => { App.setPref('plan.hidden', e.target.checked); for (const o of meshes.values()) o.visible = !e.target.checked; buildSurfGrid(); redraw(); };
+  $('structHidden').onchange = e => { App.setPref('plan.hidden', e.target.checked); for (const o of meshes.values()) o.visible = !e.target.checked; drawSelBox(); buildSurfGrid(); redraw(); };
 
   /* ---------- camera control: drag to look, WASD to fly, click to pick ---------- */
   const look = (dx, dy) => { cam.yaw -= dx * 0.0026; cam.pitch = Math.min(1.5707, Math.max(-1.5707, cam.pitch - dy * 0.0026)); redraw(); };
@@ -369,6 +393,12 @@
     if (walk.on) { if (document.pointerLockElement !== canvas) lockMouse(); return; }
     if (e.pointerType === 'touch') { touches.set(e.pointerId, [e.clientX, e.clientY]); if (touches.size === 2) { const [a, b] = [...touches.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); } }
     canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, id: e.pointerId, t: Date.now(), moved: false, shift: e.shiftKey || e.ctrlKey || e.metaKey }; canvas.style.cursor = rectMode ? 'crosshair' : 'grabbing';
+    const gAxis = giz && CAN && e.button === 0 && touches.size <= 1 ? giz.pick(camera, canvas, e.clientX, e.clientY) : -1;
+    if (gAxis >= 0) {   // drag an arrow: move the selected structure along X, Y or Z
+      const s = insts().find(q => q.id === selStruct), def = s && defOf(s.def);
+      if (def) { const fp = App.footprint(def, s); drag.giz = { axis: gAxis, s, def, ox: isModel(def) ? fp.ox : (fp.x0 + fp.x1) / 2, oz: isModel(def) ? fp.oz : (fp.z0 + fp.z1) / 2, dy: s.dy || 0, cx: s.cx, cz: s.cz, dx: s.dx || 0, dz: s.dz || 0, last: 0 };
+        giz.begin(camera, canvas, gAxis, e.clientX, e.clientY); canvas.style.cursor = 'move'; redraw(); return; }
+    }
     if (rectMode && e.button === 0 && e.pointerType !== 'touch' || rectMode && e.pointerType === 'touch' && touches.size === 1) { const c = chunkAt(e.clientX, e.clientY); if (c) rect = { a: c, keep: drag.shift ? new Set(sel) : new Set() }; }
     else if (brush.on && CAN && e.button === 0 && touches.size <= 1) {   // brush: paint zones while the button is held
       const h = rayHit(e.clientX, e.clientY, true);
@@ -390,6 +420,15 @@
         const h = rayHit(x, y, true); if (h && h.s && defOf(h.s.def) === drag.paint.def) paintAt(h, drag.paint); }); }
       return;
     }
+    if (drag.giz) {
+      const g = drag.giz, s = g.s, def = g.def, raw = giz.drag(camera, canvas, e.clientX, e.clientY), step = g.axis !== 1 && !isModel(def) ? 16 : 1, n = Math.round(raw / step) * step;
+      if (n === g.last) return; g.last = n;
+      Object.assign(s, { cx: g.cx, cz: g.cz, dx: g.dx, dz: g.dz, dy: g.dy });
+      if (g.axis === 1) s.dy = clampY(g.dy + n); else setCentre(s, def, g.ox + (g.axis === 0 ? n : 0), g.oz + (g.axis === 2 ? n : 0));
+      movedLive(s, def); const p = posOf(s, def);
+      $('structInfo').innerHTML = `<b>${esc(def.name)}</b><br>${'XYZ'[g.axis]}: ${n > 0 ? '+' : ''}${n} бл.<br>от центра платформы X ${fmtOff(p[0])} · Z ${fmtOff(p[2])} · низ на Y ${sgn(p[1])}`;
+      return;
+    }
     if (drag.struct) {
       if (!drag.moved) return; const st = drag.struct, s = st.s, def = defOf(s.def);
       if (!st.started) { st.started = true; canvas.style.cursor = 'move'; if (selStruct !== s.id) { selStruct = s.id; drawSelBox(); renderStructs(); renderZones(); showTab('structs'); } }
@@ -407,13 +446,19 @@
     const d = drag; drag = null; canvas.style.cursor = rectMode ? 'crosshair' : 'grab';
     const wasRect = rect && d.moved; rect = null;
     if (wasRect) { renderSel(); return; }
+    if (d.giz) { giz.end(); const g = d.giz; if (g.last) { movedDone(g.s, g.def); App.toast(`Сдвинуто по ${'XYZ'[g.axis]} на ${g.last > 0 ? '+' : ''}${g.last} бл.`, 1800); } else renderStructs(); drawSelBox(); redraw(); return; }
     if (d.paint) { if (d.paint.n) { storeZones(d.paint.def); App.save('structdefs'); renderZones(); } return; }
     if (d.struct && d.moved) { const st = d.struct; if (st.s.cx !== st.cx || st.s.cz !== st.cz) { buildSurfGrid(); App.save('structures'); App.toast(`Перенесено на ${sgn(st.s.cx - st.cx)}, ${sgn(st.s.cz - st.cz)} чанк.`); } renderStructs(); return; }
     if (!d.moved && Date.now() - d.t < 600 && e.button !== 2) pickAt(e.clientX, e.clientY, d.shift);
   };
   let hoverT = 0;
+  canvas.addEventListener('pointermove', e => {   // highlight the arrow under the mouse
+    if (!giz || drag || walk.on || !giz.visible || e.pointerType === 'touch') return;
+    const a = giz.pick(camera, canvas, e.clientX, e.clientY); if (giz.hover(a)) redraw();
+    if (a >= 0) canvas.style.cursor = 'pointer'; else if (canvas.style.cursor === 'pointer') canvas.style.cursor = rectMode || brush.on ? 'crosshair' : 'grab';
+  });
   canvas.addEventListener('pointermove', e => {
-    if (drag || walk.on || !CAN || rectMode || brush.on || !App.pref('plan.dragMove', false) || e.pointerType === 'touch' || !insts().length) return;
+    if (drag || walk.on || !CAN || rectMode || brush.on || !App.pref('plan.dragMove', false) || e.pointerType === 'touch' || !insts().length || canvas.style.cursor === 'pointer') return;
     const now = performance.now(); if (now - hoverT < 90) return; hoverT = now;
     canvas.style.cursor = rayHit(e.clientX, e.clientY, true) ? 'move' : 'grab';
   });
@@ -522,7 +567,7 @@
     $('walkBtn').textContent = 'Выйти (Esc)'; $('walkBtn').setAttribute('aria-pressed', 'true'); document.body.classList.add('walking');
     $('hud').dataset.text = $('hud').dataset.text || $('hud').innerHTML;
     $('hud').innerHTML = '<b>W</b><b>A</b><b>S</b><b>D</b> идти · <b>Space</b> прыжок · <b>Shift</b> бег · <b>F</b> полёт (Space/C — вверх/вниз) · мышь — смотреть' + (CAN ? ' · менять блоки — в «Структурах»' : '') + ' · <b>Esc</b> — выйти · <span id="camPos"></span>';
-    if (brush.on) setBrush(false); if (rectMode) $('rectBtn').click();
+    if (brush.on) setBrush(false); if (rectMode) $('rectBtn').click(); if (giz) giz.hide();
     for (const o of [...compass, ...labels]) o.visible = false; if (compassArrow) compassArrow.visible = false;
     lockMouse(); canvas.focus(); walk.last = performance.now(); walk.raf = requestAnimationFrame(walkTick);
   }
@@ -531,7 +576,7 @@
     if (document.pointerLockElement === canvas) document.exitPointerLock();
     Object.assign(cam, walk.saved || {}); $('walkBtn').textContent = 'Войти внутрь'; $('walkBtn').setAttribute('aria-pressed', 'false'); document.body.classList.remove('walking');
     for (const o of [...compass, ...labels]) o.visible = true; if (compassArrow) compassArrow.visible = true;
-    if ($('hud').dataset.text) $('hud').innerHTML = $('hud').dataset.text; redraw();
+    if ($('hud').dataset.text) $('hud').innerHTML = $('hud').dataset.text; drawSelBox(); redraw();
   }
   function walkTick(now) {
     if (!walk.on) return;
@@ -566,7 +611,7 @@
   document.addEventListener('pointerlockchange', () => { if (walk.on && document.pointerLockElement !== canvas && walk.wasLocked) stopWalk(); walk.wasLocked = document.pointerLockElement === canvas; if (walk.wasLocked) walk.lockedAt = performance.now(); });
   $('walkBtn').onclick = () => walk.on ? stopWalk() : startWalk();
 
-  if (location.hash === '#test') Object.assign(App, { _walk: walk, _cam: cam });
+  if (location.hash === '#test') Object.assign(App, { _walk: walk, _cam: cam, _giz: giz, _camera: camera, _canvas: canvas, _insts: insts });
 
   /* picking: walk the ray through base voxels, fall back to the ground plane */
   function chunkAt(clientX, clientY) {
@@ -590,9 +635,9 @@
       const sx = d.x > 0 ? 1 : -1, sy = d.y > 0 ? 1 : -1, sz = d.z > 0 ? 1 : -1, tdx = Math.abs(1 / d.x), tdy = Math.abs(1 / d.y), tdz = Math.abs(1 / d.z);
       let tx = (d.x > 0 ? (x + 1 - o.x) : (o.x - x)) * tdx, ty = (d.y > 0 ? (y + 1 - o.y) : (o.y - y)) * tdy, tz = (d.z > 0 ? (z + 1 - o.z) : (o.z - z)) * tdz;
       for (let i = 0; i < 3000; i++) {
-        if (y >= 0 && y < 400) { const s = solidAt(x, y, z); if (s) return { x, y, z, s }; }
+        if (y >= -64 && y < 400) { const s = solidAt(x, y, z); if (s) return { x, y, z, s }; }
         if (tx < ty && tx < tz) { x += sx; tx += tdx; } else if (ty < tz) { y += sy; ty += tdy; } else { z += sz; tz += tdz; }
-        if (y < -1 || Math.min(tx, ty, tz) > 2500) break;
+        if (y < -65 || Math.min(tx, ty, tz) > 2500) break;
       }
     }
     if (structOnly || d.y > -1e-4) return null;

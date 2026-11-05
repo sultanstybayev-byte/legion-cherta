@@ -158,7 +158,7 @@ function cleanPlan(p) {
   }));
   const structures = (Array.isArray(p.structures) ? p.structures : []).slice(0, 300).map(s => ({
     id: str(s.id, 40, 'id структуры') || String(now()), def: str(s.def, 40, 'тип структуры'), cx: int(s.cx || 0, 'Чанк X'), cz: int(s.cz || 0, 'Чанк Z'), rot: ((Math.trunc(Number(s.rot) || 0) % 4) + 4) % 4,
-    dx: int(s.dx || 0, 'Сдвиг X', -15, 15), dz: int(s.dz || 0, 'Сдвиг Z', -15, 15) }));
+    dx: int(s.dx || 0, 'Сдвиг X', -15, 15), dz: int(s.dz || 0, 'Сдвиг Z', -15, 15), dy: int(s.dy || 0, 'Высота Y', -64, 320) }));
   return {
     structures,
     platform: { size: int(pl.size || 16, 'Размер платформы', 8, 48), cx0: int(pl.cx0 || 0, 'Чанк X угла'), cz0: int(pl.cz0 || 0, 'Чанк Z угла') },
