@@ -356,8 +356,9 @@
 
   /* ---------- export: Sponge schematic v2 (.schem), opens in WorldEdit / FAWE / Litematica / Amulet ---------- */
   VX.exportSchem = async function (vox) {
-    const b = vox.bounds() || { x0: vox.x0, x1: vox.x0, y0: 0, y1: 0, z0: vox.z0, z1: vox.z0 };
-    const W = b.x1 - b.x0 + 1, H = b.y1 + 1, L = b.z1 - b.z0 + 1;
+    // keep the whole box around the centre (not just the blocks), so the centre stays the centre after loading it back
+    const bb = vox.bounds() || { y1: 0 }, b = { x0: vox.x0, z0: vox.z0 };
+    const W = vox.w, H = bb.y1 + 1, L = vox.d;
     const used = new Map([[0, 0]]), names = [AIR], data = new Buf(W * H * L + 16);
     for (let y = 0; y < H; y++) for (let z = 0; z < L; z++) for (let x = 0; x < W; x++) {
       const v = vox.get(x + b.x0, y, z + b.z0); let k = used.get(v); if (k === undefined) { k = names.length; used.set(v, k); names.push(vox.palette[v]); } data.varint(k);
