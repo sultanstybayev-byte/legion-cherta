@@ -7,7 +7,7 @@
 <script>/* theme before first paint: saved choice, dark by default */ try { document.documentElement.dataset.theme = localStorage.getItem("mcmap.theme") || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
-<link rel="stylesheet" href="css/style.css?v=1110">
+<link rel="stylesheet" href="css/style.css?v=1112">
 </head>
 <body>
 <div class="app">
@@ -96,7 +96,17 @@
       <h2>Инструменты</h2>
       <label class="f">Блок<input type="search" id="blockSearch" placeholder="поиск: quartz, стекло, oak_stairs[facing=north]…" list="blockList"></label>
       <datalist id="blockList"></datalist>
+      <div class="row"><button class="btn primary" id="creativeBtn" title="E">Все блоки — как в креативе</button></div>
       <div class="palette" id="palette" aria-label="Блоки этой структуры"></div>
+      <div class="texbox">
+        <p class="note" id="texInfo"></p>
+        <div class="row">
+          <label class="btn sm" for="texFiles">Загрузить текстуры (.jar / .zip)</label><input type="file" id="texFiles" accept=".jar,.zip" multiple hidden>
+          <label class="btn sm" for="texDir">Вся папка mods</label><input type="file" id="texDir" webkitdirectory multiple hidden>
+          <button class="btn sm" id="texClear" hidden>Удалить текстуры</button>
+        </div>
+        <p class="note">Текстуры берутся из твоих файлов игры и остаются только в этом браузере — на сайт и в GitHub они не попадают. Выбери <b>.jar самой игры</b> (папка <span class="mono">.minecraft/versions/1.21.1/1.21.1.jar</span> или та же папка сборки в лаунчере) и <b>.jar модов</b> из папки <span class="mono">mods</span> — можно сразу всю папку. Ресурспак .zip тоже подходит.</p>
+      </div>
       <div id="brushOpts" class="row" hidden>
         <label class="f">Размер кисти<select id="brushSize"><option value="1">1 блок</option><option value="2">3</option><option value="3">5</option><option value="4">7</option><option value="6">11</option><option value="9">17</option></select></label>
         <label class="f">Режим<select id="brushMode"><option value="sphere">Шар из блока</option><option value="paint">Перекрасить (только видимую поверхность)</option><option value="erase">Стереть</option></select></label>
@@ -107,7 +117,7 @@
 
     <section class="sec" id="shapeSec" hidden>
       <h2>Фигуры <small id="shapeCount"></small></h2>
-      <p class="note">Как объекты в Blender: добавь фигуру, подвинь, поверни, растяни, настрой — пока это полупрозрачный предпросмотр. «Применить в блоки» превращает её в блоки (с симметрией, если она включена).</p>
+      <p class="note">Как объекты в Blender: добавь фигуру, подвинь, поверни, растяни, настрой — в редакторе фигура полупрозрачная. Фигуры — живая часть структуры: их видно и в «Плане базы», и в скачанной .schem. «Применить в блоки» превращает фигуру в обычные блоки (с симметрией структуры), чтобы править её поблочно.</p>
       <div class="we" id="shapeAdd">
         <button class="btn sm" data-add="petal">+ Лепесток</button>
         <button class="btn sm" data-add="sphere">+ Шар</button>
@@ -139,6 +149,13 @@
     </section>
   </aside>
 </div>
+<dialog id="creativeDlg" class="creative">
+  <div class="dh"><h2>Блоки</h2><input type="search" id="crSearch" placeholder="Поиск: кальцит, marble, stairs…" spellcheck="false"><button class="btn sm" data-close>Закрыть</button></div>
+  <div class="crtabs" id="crTabs" role="group" aria-label="Вкладки"></div>
+  <div class="crgrid" id="crGrid"></div>
+  <div class="crfoot"><span id="crHand" class="mono"></span><span class="note" id="crCount"></span></div>
+  <p class="note" id="crNote">Пока это базовый список без текстур. Загрузи текстуры игры (кнопка в «Инструментах»), и здесь появятся все блоки игры и модов по вкладкам, как в креативе.</p>
+</dialog>
 <dialog id="newDlg">
   <div class="dh"><h2>Новая структура</h2><button class="btn sm" data-close>Закрыть</button></div>
   <div class="db">
@@ -158,9 +175,10 @@
 <script src="js/config.js"></script>
 <script src="js/common.js?v=1106"></script>
 <script src="js/temple.js?v=1106"></script>
-<script src="js/vox.js?v=1110"></script>
-<script src="js/shapes.js?v=1106"></script>
+<script src="js/vox.js?v=1111"></script>
+<script src="js/shapes.js?v=1111"></script>
+<script src="js/textures.js?v=1112"></script>
 <script src="js/gizmo.js?v=1109"></script>
-<script src="js/structures.js?v=1110"></script>
+<script src="js/structures.js?v=1112"></script>
 </body>
 </html>

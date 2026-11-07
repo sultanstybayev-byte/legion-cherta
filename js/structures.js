@@ -96,9 +96,10 @@
     const f = e.target.files[0]; e.target.value = ''; if (!f || (!CAN && deny())) return;
     await withBusy('Читаю схематику…', async () => {
       const v = await VX.importFile(f);
-      const def = { id: uid(), name: f.name.replace(/\.[^.]+$/, '').slice(0, 60) || 'Схематика', kind: 'voxel', sym: SYMS.none, color: '#2e86c1', note: `Загружено из ${f.name}`, edits: [], zones: [], w: Math.ceil(v.w / 16), d: Math.ceil(v.d / 16), h: v.h };
+      const m = v.meta, def = { id: uid(), name: (m && m.name) || f.name.replace(/\.[^.]+$/, '').slice(0, 60) || 'Схематика', kind: 'voxel', sym: (m && m.sym) || SYMS.none, color: '#2e86c1', note: `Загружено из ${f.name}`, edits: [], zones: [], w: Math.ceil(v.w / 16), d: Math.ceil(v.d / 16), h: v.h,
+        shapes: m && Array.isArray(m.shapes) ? m.shapes.map(q => Object.assign({}, q, { id: Math.random().toString(36).slice(2, 10) })) : [] };
       await VX.saveModel(def, v); defs().push(def); App.save('structdefs');
-      App.toast(`Загружено: ${v.w}×${v.h}×${v.d}, блоков ${fmt(v.count())}`, 5000); await select(def.id);
+      App.toast(`Загружено: ${v.w}×${v.h}×${v.d}, блоков ${fmt(v.count())}${def.shapes.length ? `, фигур ${def.shapes.length}` : ''}`, 5000); await select(def.id);
     });
   };
   $('schemInto').onchange = async e => {
@@ -113,7 +114,7 @@
   $('exportBtn').onclick = async () => {
     const d = defOf(cur); if (!d || !vox) return;
     await withBusy('Готовлю файл…', async () => {
-      const bytes = await VX.exportSchem(vox), a = document.createElement('a');
+      const bytes = await VX.exportSchem(VX.composed(d, vox)), a = document.createElement('a');   // with the live shapes turned into blocks
       a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' })); a.download = (d.name.replace(/[^\p{L}\p{N}_ -]+/gu, '').trim() || 'structure') + '.schem';
       document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     });
@@ -183,10 +184,33 @@
   /* palette lookups, extended as the palette grows */
   let pal = { n: 0, rgb: [], glass: [], solid: [], open: [] };
   function palInfo() {
-    if (vox && pal.n === vox.palette.length) return pal;
+    if (vox && pal.n === vox.palette.length && pal.txv === (window.TX ? TX.version : 0)) return pal;
     const P = vox ? vox.palette : [];
-    pal = { n: P.length, rgb: P.map(VX.rgb), glass: P.map(VX.isTransparent), solid: P.map((n, i) => i > 0 && VX.isSolid(n)), open: P.map((n, i) => i === 0 || VX.isTransparent(n)) };
-    return pal;
+    const T = window.TX && TX.loaded;
+    pal = { n: P.length, rgb: P.map(n => T && TX.has(n) ? [1, 1, 1] : VX.rgb(n)), glass: P.map(VX.isTransparent), solid: P.map((n, i) => i > 0 && VX.isSolid(n)), open: P.map((n, i) => i === 0 || VX.isTransparent(n)),
+      tile: P.map(n => { const f = T && TX.faces(n); return f ? [f[0], f[1], f[2], TX.tint(n)] : [-1, -1, -1, 0]; }) };
+    pal.txv = window.TX ? TX.version : 0; return pal;
+  }
+  /* textured blocks: one atlas, the tile of each face comes in an instanced attribute */
+  let atlasTex = null, atlasV = -1;
+  function blockMaterial(glass) {
+    const T = window.TX && TX.loaded && TX.atlasCanvas;
+    if (!T) return glass ? new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.42, depthWrite: false }) : new THREE.MeshLambertMaterial({ color: 0xffffff });
+    if (atlasV !== TX.version) { if (atlasTex) atlasTex.dispose(); atlasTex = new THREE.CanvasTexture(TX.atlasCanvas); atlasTex.magFilter = atlasTex.minFilter = THREE.NearestFilter; atlasTex.generateMipmaps = false; atlasV = TX.version; }
+    const m = new THREE.MeshLambertMaterial({ color: 0xffffff, map: atlasTex, transparent: glass, opacity: 1, depthWrite: !glass, alphaTest: glass ? 0.02 : 0.5 });
+    m.onBeforeCompile = sh => {
+      sh.uniforms.tintC = { value: new THREE.Color(0.57, 0.74, 0.35) };
+      sh.vertexShader = 'attribute vec4 tile;\nvarying vec2 vTileOff;\nvarying float vTint;\nvarying float vHasTile;\n' + sh.vertexShader.replace('#include <uv_vertex>', `#include <uv_vertex>
+        float tIdx = normal.y > 0.5 ? tile.x : (normal.y < -0.5 ? tile.z : tile.y);
+        float bit = normal.y > 0.5 ? 1.0 : (normal.y < -0.5 ? 4.0 : 2.0);
+        vTint = mod(floor(tile.w / bit), 2.0); vHasTile = tIdx < 0.0 ? 0.0 : 1.0;
+        vTileOff = vec2(mod(max(tIdx, 0.0), ${TX.GRID}.0), floor(max(tIdx, 0.0) / ${TX.GRID}.0));`);
+      sh.fragmentShader = 'uniform vec3 tintC;\nvarying vec2 vTileOff;\nvarying float vTint;\nvarying float vHasTile;\n' + sh.fragmentShader.replace('#include <map_fragment>', `
+        if (vHasTile > 0.5) { vec2 tuv = clamp(vUv, 0.002, 0.998);
+          vec2 auv = vec2((vTileOff.x + tuv.x) / ${TX.GRID}.0, 1.0 - (vTileOff.y + 1.0 - tuv.y) / ${TX.GRID}.0);
+          vec4 texelColor = texture2D(map, auv); if (vTint > 0.5) texelColor.rgb *= tintC; diffuseColor *= texelColor; }`);
+    };
+    return m;
   }
   /* visible blocks as two instanced meshes (opaque, glass) that can be updated block by block */
   const view = { meshes: [null, null], pos: [null, null], n: [0, 0], cap: [0, 0], index: new Map() };
@@ -196,25 +220,26 @@
   }
   function rebuild(recenter) {
     hmDirty = true;
-    for (const m of view.meshes) if (m) { scene.remove(m); m.material.dispose(); m.dispose(); }
-    view.meshes = [null, null]; view.index.clear(); view.n = [0, 0];
+    for (const m of view.meshes) if (m) { scene.remove(m); m.material.dispose(); if (m.geometry !== geo) m.geometry.dispose(); m.dispose(); }
+    view.meshes = [null, null]; view.tile = [null, null]; view.index.clear(); view.n = [0, 0];
     if (box) { scene.remove(box); box.traverse(x => { if (x.geometry && x.geometry !== geo) x.geometry.dispose(); if (x.material) x.material.dispose(); }); box = null; }
     const d = defOf(cur);
     if (!vox) { if (d && !isModel(d)) drawBox(d); drawGrid(); redraw(); return; }
     const s = VX.surface(vox), p = palInfo();
     for (const g of [0, 1]) {
       let cnt = 0; for (let i = 0; i < s.n; i++) if (s.glass[i] === g) cnt++;
-      const cap = cnt + 30000, mat = g ? new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.42, depthWrite: false }) : new THREE.MeshLambertMaterial({ color: 0xffffff });
-      const m = new THREE.InstancedMesh(geo, mat, cap); m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3); m.count = 0; m.renderOrder = g;
+      const cap = cnt + 30000, mat = blockMaterial(!!g), gg = geo.clone(), ta = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4).fill(-1), 4); gg.setAttribute('tile', ta);
+      const m = new THREE.InstancedMesh(gg, mat, cap); m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3); m.count = 0; m.renderOrder = g; view.tile[g] = ta;
       view.meshes[g] = m; view.pos[g] = new Int16Array(cap * 3); view.cap[g] = cap; scene.add(m);
     }
     for (let i = 0; i < s.n; i++) addInst(s.glass[i], s.pos[3 * i], s.pos[3 * i + 1], s.pos[3 * i + 2]);
-    for (const m of view.meshes) { m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; }
+    flushView();
     void p; drawGrid(); if (recenter) frame(); renderInfo(); redraw();
   }
   function addInst(g, x, y, z) {
     const m = view.meshes[g], i = view.n[g]++, p = palInfo(), rgb = p.rgb[vox.get(x, y, z)] || [1, 0, 1];
     tmpM.makeTranslation(x + .5, y + .5, z + .5); m.setMatrixAt(i, tmpM); m.instanceColor.setXYZ(i, rgb[0], rgb[1], rgb[2]);
+    const tl = p.tile[vox.get(x, y, z)]; if (tl && view.tile[g]) view.tile[g].setXYZW(i, tl[0], tl[1], tl[2], tl[3]);
     view.pos[g][3 * i] = x; view.pos[g][3 * i + 1] = y; view.pos[g][3 * i + 2] = z; view.index.set(x + ',' + y + ',' + z, g * 1e8 + i); m.count = view.n[g];
   }
   function removeInst(code) {
@@ -222,6 +247,7 @@
     view.index.delete(P[3 * i] + ',' + P[3 * i + 1] + ',' + P[3 * i + 2]);
     if (i !== last) {
       m.instanceMatrix.array.copyWithin(i * 16, last * 16, last * 16 + 16); m.instanceColor.array.copyWithin(i * 3, last * 3, last * 3 + 3); P.copyWithin(3 * i, 3 * last, 3 * last + 3);
+      if (view.tile[g]) view.tile[g].array.copyWithin(i * 4, last * 4, last * 4 + 4);
       view.index.set(P[3 * i] + ',' + P[3 * i + 1] + ',' + P[3 * i + 2], g * 1e8 + i);
     }
     m.count = view.n[g];
@@ -232,12 +258,12 @@
     for (const [dx, dy, dz] of [[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
       const a = x + dx, b = y + dy, c = z + dz, code = view.index.get(a + ',' + b + ',' + c), want = visible(a, b, c), g = want ? (p.glass[vox.get(a, b, c)] ? 1 : 0) : -1;
       if (code !== undefined && (!want || (code >= 1e8 ? 1 : 0) !== g)) removeInst(code);
-      if (want) { const k = view.index.get(a + ',' + b + ',' + c); if (k !== undefined) { const gi = k >= 1e8 ? 1 : 0, ii = k - gi * 1e8, rgb = p.rgb[vox.get(a, b, c)]; view.meshes[gi].instanceColor.setXYZ(ii, rgb[0], rgb[1], rgb[2]); }
+      if (want) { const k = view.index.get(a + ',' + b + ',' + c); if (k !== undefined) { const gi = k >= 1e8 ? 1 : 0, ii = k - gi * 1e8, rgb = p.rgb[vox.get(a, b, c)]; view.meshes[gi].instanceColor.setXYZ(ii, rgb[0], rgb[1], rgb[2]); const tl = p.tile[vox.get(a, b, c)]; if (tl && view.tile[gi]) view.tile[gi].setXYZW(ii, tl[0], tl[1], tl[2], tl[3]); }
         else { if (view.n[g] >= view.cap[g]) return false; addInst(g, a, b, c); } }
     }
     return true;
   }
-  function flushView() { for (const m of view.meshes) if (m) { m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; } }
+  function flushView() { for (const m of view.meshes) if (m) { m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; } for (const t of view.tile || []) if (t) t.needsUpdate = true; }
   // placeholder box for structures that are not block models yet
   let box = null;
   function drawBox(d) {
@@ -307,7 +333,7 @@
     if (!vox) return 0; if (!CAN) { deny(); return 0; }
     opt = opt || {};
     let items = list;
-    if (symActive() && !opt.noSym) {
+    if ((symActive() || opt.forceSym) && symOf(defOf(cur)) && !opt.noSym) {
       const sym = symOf(defOf(cur)), out = new Map();
       for (const [x, y, z, name] of list) for (const [a, b, k, m] of VX.symImages(x, z, sym)) {
         let nm = name; if (k > 0) nm = VX.rotateName(nm, k); if (m) nm = VX.flipName(nm, sym.axis === 'z' ? 'z' : 'x');
@@ -430,18 +456,63 @@
   function blocksPlayer(x, y, z) { return x + 1 > fp.x - .3 && x < fp.x + .3 && z + 1 > fp.z - .3 && z < fp.z + .3 && y + 1 > fp.y && y < fp.y + 1.8; }
 
   /* hotbar & block picker */
+  // a block's picture: its cube icon from the game's textures, else a colour square
+  function swatch(n, px) { const u = window.TX && TX.loaded && TX.icon(n, px * 2); return u ? `<img class="bicon" src="${u}" width="${px}" height="${px}" alt="">` : `<i style="background:${VX.colorOf(n)}${VX.isTransparent(n) ? ';opacity:.55' : ''}"></i>`; }
+  function blockLabel(n) { const l = window.TX && TX.label(n); if (!l) return VX.label(n); const st = (String(n).match(/\[(.*)\]$/) || [])[1]; return l + (st ? ` [${st}]` : ''); }
   function setSlotBlock(name) { if (!name || name === 'minecraft:air') return; slots[slot] = name; renderHotbar(); $('blockSearch').value = ''; renderPalette(); }
   function renderHotbar() {
-    $('hotbar').innerHTML = slots.map((n, i) => `<div class="slot${i === slot ? ' on' : ''}" data-slot="${i}" title="${esc(VX.label(n))}"><i style="background:${VX.colorOf(n)}${VX.isTransparent(n) ? ';opacity:.55' : ''}"></i><span>${i + 1}</span></div>`).join('') + `<div class="slotname">${esc(VX.label(block()))}</div>`;
+    $('hotbar').innerHTML = slots.map((n, i) => `<div class="slot${i === slot ? ' on' : ''}" data-slot="${i}" title="${esc(blockLabel(n))}">${swatch(n, 32)}<span>${i + 1}</span></div>`).join('') + `<div class="slotname">${esc(blockLabel(block()))}</div>`;
   }
   $('hotbar').addEventListener('click', e => { const s = e.target.closest('[data-slot]'); if (s) { slot = +s.dataset.slot; renderHotbar(); } });
   function renderPalette() {
     const names = vox ? vox.palette.slice(1) : [];
-    $('palette').innerHTML = names.slice(0, 60).map(n => `<button type="button" data-b="${esc(n)}" title="${esc(VX.label(n))}" aria-pressed="${n === block()}"><i style="background:${VX.colorOf(n)}"></i>${esc(VX.label(n).replace(/ \[.*$/, ''))}</button>`).join('') || '<span class="note">В модели пока нет блоков.</span>';
+    $('palette').innerHTML = names.slice(0, 60).map(n => `<button type="button" data-b="${esc(n)}" title="${esc(n)}" aria-pressed="${n === block()}">${swatch(n, 20)}${esc(blockLabel(n).replace(/ \[.*$/, ''))}</button>`).join('') || '<span class="note">В модели пока нет блоков.</span>';
     $('blockList').innerHTML = [...new Set(VX.COMMON.concat(names))].map(n => `<option value="${esc(n.replace(/^minecraft:/, ''))}">${esc(VX.label(n))}</option>`).join('');
   }
   $('palette').addEventListener('click', e => { const b = e.target.closest('[data-b]'); if (b) setSlotBlock(b.dataset.b); });
   $('blockSearch').addEventListener('change', e => { const n = VX.normName(e.target.value); if (n) { setSlotBlock(n); App.toast('Блок в руке: ' + VX.label(n), 1800); } });
+
+  /* ================= textures from the game files + creative block picker ================= */
+  function texInfo() {
+    $('texInfo').innerHTML = window.TX && TX.loaded ? `Текстуры загружены: <b>${fmt(TX.count)}</b> блоков. Хранятся только в этом браузере.` : 'Текстур нет — блоки показаны цветом. Загрузи файлы игры, чтобы видеть настоящие текстуры.';
+    $('texClear').hidden = !(window.TX && TX.loaded);
+  }
+  async function importTex(files) {
+    if (!files || !files.length) return;
+    $('busyTitle').textContent = 'Достаю текстуры…'; $('busy').hidden = false;
+    try { const r = await TX.importFiles(files, t => { $('busyNote').textContent = t; });
+      App.toast(`Готово: ${fmt(r.blocks)} блоков, ${fmt(r.textures)} текстур из ${r.files} файл.`, 5000); pal.n = -1; rebuild(); renderHotbar(); renderPalette(); texInfo(); if ($('creativeDlg').open) renderCreative(); }
+    catch (e) { App.toast('Не вышло: ' + e.message, 6000); console.warn(e); }
+    finally { $('busy').hidden = true; $('busyNote').textContent = 'Это пара секунд.'; }
+  }
+  $('texFiles').onchange = e => { const f = [...e.target.files]; e.target.value = ''; importTex(f); };
+  $('texDir').onchange = e => { const f = [...e.target.files]; e.target.value = ''; importTex(f); };
+  $('texClear').onclick = async () => { await TX.clear(); pal.n = -1; rebuild(); renderHotbar(); renderPalette(); texInfo(); App.toast('Текстуры удалены из браузера', 2500); };
+  let crTab = 'build', crList = null, crListV = -1;
+  function creativeItems() {
+    if (window.TX && TX.loaded) { if (crListV !== TX.version) { crList = TX.list(); crListV = TX.version; } return crList; }
+    const names = [...new Set(VX.COMMON.map(n => VX.normName(n)).concat(vox ? vox.palette.slice(1) : []))];
+    return names.map(n => ({ name: n, label: VX.label(n), ns: n.split(':')[0], tab: 'build' }));
+  }
+  function renderCreative() {
+    const items = creativeItems(), q = $('crSearch').value.trim().toLowerCase(), T = window.TX && TX.loaded;
+    const mods = [...new Set(items.map(i => i.ns))].filter(n => n !== 'minecraft').sort();
+    const tabs = T ? TX.TABS.concat(mods.map(n => ['mod:' + n, TX.modName(n)])) : [['build', 'Блоки']];
+    if (!tabs.some(t => t[0] === crTab)) crTab = tabs[0][0];
+    $('crTabs').innerHTML = tabs.map(([k, l]) => `<button type="button" data-tab="${esc(k)}" aria-pressed="${!q && k === crTab}">${esc(l)}</button>`).join('');
+    const shown = q ? items.filter(i => i.label.toLowerCase().includes(q) || i.name.includes(q)) : items.filter(i => i.tab === crTab);
+    shown.sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+    $('crGrid').innerHTML = shown.slice(0, 900).map(i => `<button type="button" class="cr" data-b="${esc(i.name)}" title="${esc(i.label)}\n${esc(i.name)}" aria-pressed="${i.name === block()}">${swatch(i.name, 36)}</button>`).join('')
+      || '<p class="note">Ничего не найдено.</p>';
+    $('crCount').textContent = shown.length > 900 ? `показано 900 из ${shown.length} — уточни поиск` : `${shown.length} бл.`;
+    $('crNote').hidden = !!T;
+  }
+  function openCreative() { renderCreative(); $('creativeDlg').showModal(); setTimeout(() => $('crSearch').focus(), 30); }
+  $('creativeBtn').onclick = openCreative;
+  $('crTabs').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (!b) return; crTab = b.dataset.tab; $('crSearch').value = ''; renderCreative(); });
+  $('crSearch').addEventListener('input', renderCreative);
+  $('crGrid').addEventListener('click', e => { const b = e.target.closest('[data-b]'); if (!b) return; setSlotBlock(b.dataset.b); renderCreative(); $('crHand').textContent = 'В руке (слот ' + (slot + 1) + '): ' + blockLabel(block()); });
+  $('crGrid').addEventListener('mouseover', e => { const b = e.target.closest('[data-b]'); if (b) $('crHand').textContent = blockLabel(b.dataset.b) + ' · ' + b.dataset.b; });
 
   /* selection box */
   let selMesh = null;
@@ -684,7 +755,7 @@
   function bakeShape(id) {
     if (!CAN && deny()) return; const s0 = shapes().find(q => q.id === id); if (!s0) return;
     const nm = s0.mode === 'cut' ? 'minecraft:air' : (s0.block || block()), cells = SH.cells(s0);
-    const n = apply(cells.map(([x, y, z]) => [x, y, z, nm]), 'фигура «' + s0.name + '»', { shape: clone(s0) });
+    const n = apply(cells.map(([x, y, z]) => [x, y, z, nm]), 'фигура «' + s0.name + '»', { shape: clone(s0), forceSym: true });
     if (!n) { App.toast('Блоки не изменились: фигура пустая или уже такая же.', 3000); return; }
     removeShape(id, true); App.toast(`«${s0.name}» → ${fmt(n)} бл.${symActive() ? ' с симметрией' : ''}. Ctrl+Z вернёт фигуру.`, 4000);
   }
@@ -733,7 +804,7 @@
     if (gizmo) { scene.remove(gizmo); gizmo.traverse(x => { if (x.geometry) x.geometry.dispose(); if (x.material) x.material.dispose(); }); gizmo = null; }
     ghostMap = new Map();
     if (!vox || !$('sGhost').checked) { drawGuides(new Map()); updateGiz(); redraw(); return; }
-    const list = [], boxes = new Map(), sym = symActive() ? symOf(defOf(cur)) : null, acc = new THREE.Color(css('--accent') || '#e07b2a');
+    const list = [], boxes = new Map(), sym = symOf(defOf(cur)), acc = new THREE.Color(css('--accent') || '#e07b2a');
     for (const q of shapes()) {
       if (q.hidden) continue; const on = q.id === selShape, base = new THREE.Color(q.mode === 'cut' ? '#e74c3c' : VX.colorOf(q.block || block()));
       const col = on ? base.clone().lerp(acc, .35) : base, colM = base.clone().lerp(new THREE.Color('#ffffff'), .35);
@@ -955,7 +1026,8 @@
     }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') { e.preventDefault(); redo(); return; }
-    if (/^Digit[1-9]$/.test(e.code)) { slot = +e.code.slice(5) - 1; renderHotbar(); return; }
+    if (/^Digit[1-9]$/.test(e.code)) { slot = +e.code.slice(5) - 1; renderHotbar(); if ($('creativeDlg').open) $('crHand').textContent = 'Слот ' + (slot + 1) + ': ' + blockLabel(block()); return; }
+    if (e.code === 'KeyE' && !$('creativeDlg').open) { e.preventDefault(); if (fp.on && document.pointerLockElement === canvas) { resumeFP = true; document.exitPointerLock(); } openCreative(); return; }
     if (e.code === 'KeyH') return setTool('look'); if (e.code === 'KeyB') return setTool('block'); if (e.code === 'KeyN') return setTool('brush'); if (e.code === 'KeyV') return setTool('select');
     if (e.code === 'KeyT' || e.key === '/') { e.preventDefault(); if (fp.on && document.pointerLockElement === canvas) { resumeFP = true; document.exitPointerLock(); } $('cmd').focus(); if (e.key === '/') $('cmd').value = '//'; return; }
     if (!fp.on) return;
@@ -1031,7 +1103,8 @@
   function hudPos() { const el = document.getElementById('fpPos'); if (el) { const [ox, oz] = gridOff(); el.textContent = `X ${Math.floor(fp.x)} · Y ${Math.floor(fp.y)} · Z ${Math.floor(fp.z)} от центра модели · чанк ${Math.floor((Math.floor(fp.x) + ox) / 16)}, ${Math.floor((Math.floor(fp.z) + oz) / 16)}${fp.fly ? ' · полёт' : ''}`; } }
 
   /* ================= start ================= */
-  setTool('look'); renderHotbar(); helpText();
+  setTool('look'); renderHotbar(); helpText(); texInfo();
+  if (window.TX) TX.ready().then(ok => { if (!ok) return; pal.n = -1; if (vox) rebuild(); renderHotbar(); renderPalette(); texInfo(); });
   $('symOn').addEventListener('change', () => drawGhosts());
   $('surfOn').checked = App.pref('struct.surfGrid', true);
   $('surfOn').onchange = e => { App.setPref('struct.surfGrid', e.target.checked); drawSurfGrid(); };
